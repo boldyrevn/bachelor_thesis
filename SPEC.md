@@ -1,160 +1,132 @@
-# Technical Specification: Low-Code ETL & ML Orchestrator
+# Роль
+Ты — Senior Software Architect и Fullstack Developer. Твоя задача — помочь разработать MVP Low-code ETL платформы для выпускной квалификационной работы.
 
-## 1. Project Overview
-**Name:** FlowETL (Working Title)  
-**Type:** Bachelor Thesis Project  
-**Goal:** Develop a low-code platform for designing, executing, and monitoring data pipelines (ETL/ELT) with integrated Machine Learning capabilities.  
-**Key Concept:** Unified interface for heterogeneous data sources (Relational DBs, Object Storage). Object Storage (S3) is treated as a first-class data source, not just temporary storage.  
-**Deployment:** Local-first via Docker Compose, scalable architecture.
+# Название проекта
+**FlowForge** — Low-code оркестратор данных с типизированными артефактами.
 
-## 2. Architecture Principles
-1.  **Decoupled Compute & Storage:** Execution logic (Workers) is separated from data storage (PostgreSQL, MinIO, External DBs).
-2.  **Type-Safe Data Contracts:** Pipeline blocks define strict input/output types (e.g., `DB_TABLE`, `S3_FILE`, `ML_MODEL`). UI prevents invalid connections.
-3.  **Hybrid Execution:** 
-    *   SQL transformations can execute inplace (Push-down) within the source DB.
-    *   Python/ML transformations execute in isolated Workers using data from Object Storage.
-4.  **Security:** All connection credentials (passwords, keys) are encrypted at rest in the metadata database.
+# Ключевая Архитектурная Концепция
+Система представляет собой оркестратор задач с визуальным конструктором. Главная особенность — **Типизированный Контекст и Артефакты**.
 
-## 3. Technology Stack
-| Component | Technology | Version | Notes |
-| :--- | :--- | :--- | :--- |
-| **Backend API** | Python, FastAPI | 3.10+, 0.100+ | Async support, Pydantic V2 |
-| **ORM** | SQLAlchemy | 2.0+ | AsyncIO engine |
-| **Task Queue** | Celery | 5.3+ | Redis as Broker & Backend |
-| **Broker/Cache** | Redis | 7+ | For Celery & App Caching |
-| **Metadata DB** | PostgreSQL | 15+ | Stores configs, logs, users |
-| **Object Storage** | MinIO | Latest | S3-Compatible API (Data Lake) |
-| **Frontend** | React, TypeScript | 18+, 5+ | Vite build tool |
-| **Graph Editor** | React Flow | 11+ | Node-based UI |
-| **UI Framework** | TailwindCSS, Shadcn/UI | - | Rapid UI development |
-| **ML Libraries** | CatBoost, Pandas | Latest | Installed in Worker Image |
-| **Infrastructure** | Docker, Docker Compose | - | Single command deployment |
+1. **Stateless Nodes:** Ноды не хранят состояние в памяти. Каждая нода — независимая задача, которая читает из хранилища, обрабатывает, пишет в хранилище.
+2. **Коннекторы (Connections):** Независимые сущности с учетными данными (PostgreSQL, S3, Spark, ClickHouse). Ноды ссылаются на них по ID.
+3. **Артефакты (Outputs):** Каждая нода декларирует типизированные выходы (например, `s3_path: train_df`, `s3_path: test_df`). Значения сохраняются в БД после выполнения.
+4. **Разрешение Зависимостей:** Следующие ноды ссылаются на выходы предыдущих через `{{ node_id.output_name }}`. Оркестратор разрешает эти ссылки перед запуском задачи.
+5. **Параметры Запуска:** Входная нода позволяет задать переменные для всего пайплайна (`date`, `env`), доступные всем нодам.
+6. **Оркестрация (Celery):** Каждая нода — отдельная задача Celery с изоляцией и логированием.
 
-## 4. Core Entities & Data Model
+# Технологический Стек (Строго соблюдать)
+| Компонент | Технология | Версия |
+|-----------|------------|--------|
+| Backend | FastAPI + Python | 3.9+ |
+| Task Queue | Celery + Redis | 5.x |
+| Frontend | React + TypeScript | 18+ |
+| UI Library | React Flow | 11+ |
+| Database | PostgreSQL | 14+ |
+| ORM | SQLAlchemy | 2.0 (async) |
+| Validation | Pydantic | 2.x |
+| Spark | PySpark | 3.4+ (Standalone) |
+| Light Engine | DuckDB | In-process |
+| ML | CatBoost + Scikit-Learn | Latest |
+| Storage | MinIO | S3-compatible |
+| Infra | Docker + Docker Compose | Latest |
+| Tests | pytest + testcontainers | Latest |
 
-### 4.1. Connections (`connections` table)
-Represents external systems accessible by the platform.
-- `id`: UUID (PK)
-- `name`: String (Unique)
-- `type`: Enum (`POSTGRES`, `CLICKHOUSE`, `S3`, `SPARK`)
-- `config`: JSONB (Encrypted) 
-  - Example PG: `{"host": "...", "port": 5432, "user": "...", "password": "...", "db": "..."}`
-  - Example S3: `{"endpoint": "...", "bucket": "...", "access_key": "...", "secret_key": "..."}`
-- `created_at`: DateTime
+# Структура Проекта
+flowforge/
+├── backend/
+│ ├── app/
+│ │ ├── api/ # FastAPI endpoints
+│ │ ├── core/ # Config, security, logging
+│ │ ├── models/ # SQLAlchemy models
+│ │ ├── schemas/ # Pydantic schemas
+│ │ ├── connections/ # Connection managers
+│ │ ├── nodes/ # Node implementations
+│ │ ├── orchestration/ # Graph resolution, context
+│ │ └── workers/ # Celery tasks & config
+│ ├── tests/
+│ │ ├── unit/
+│ │ ├── integration/
+│ │ └── conftest.py
+│ ├── requirements.txt
+│ └── pytest.ini
+├── frontend/
+│ ├── src/
+│ │ ├── components/
+│ │ ├── flows/ # React Flow nodes
+│ │ ├── api/ # API client
+│ │ └── types/ # TypeScript types
+│ ├── package.json
+│ └── tsconfig.json
+├── docker/
+│ ├── spark/ # Spark Docker config
+│ └── minio/ # MinIO init scripts
+├── docker-compose.yml
+├── AI_CONTEXT.md # Контекст для сессий
+└── README.md
 
-### 4.2. Pipelines (`pipelines` table)
-Definition of the DAG (Directed Acyclic Graph).
-- `id`: UUID (PK)
-- `name`: String
-- `graph_definition`: JSONB (Stores nodes, edges, positions from React Flow)
-- `is_active`: Boolean
-- `updated_at`: DateTime
+# Модели Данных (Ключевые сущности)
+1. **Connection:** `id, name, type (postgres|clickhouse|s3|spark), config (JSON), secrets (JSON), created_at`
+2. **Pipeline:** `id, name, description, graph_definition (JSON), created_at, updated_at`
+3. **PipelineRun:** `id, pipeline_id, status, parameters (JSON), started_at, completed_at`
+4. **NodeRun:** `id, run_id, node_id, status, logs (TEXT), output_values (JSONB), started_at, completed_at`
+5. **NodeOutputSpec:** `node_type, output_name, output_type (s3_path|model_artifact|string|number)`
 
-### 4.3. Executions (`executions` table)
-Runtime instances of pipelines.
-- `id`: UUID (PK)
-- `pipeline_id`: UUID (FK)
-- `status`: Enum (`PENDING`, `RUNNING`, `SUCCESS`, `FAILED`)
-- `started_at`: DateTime
-- `finished_at`: DateTime
+# Функциональные Требования (MVP)
+1. **Менеджер Коннекторов:** CRUD + тестирование соединения.
+2. **Визуальный Редактор:** React Flow холст, настройка нод, маппинг входов/выходов.
+3. **Типы Артефактов:** `s3_path`, `db_table`, `string`, `number`, `model_artifact`.
+4. **Ноды (минимум):**
+   - `PipelineParams` — входные параметры пайплайна.
+   - `PostgresToS3` — выгрузка из PG в S3 (Parquet).
+   - `TrainTestSplit` — разделение датасета.
+   - `CatBoostTrain` — обучение модели.
+5. **Оркестрация:** Валидация графа, разрешение `{{...}}`, запуск Celery, логирование.
 
-### 4.4. Tasks (`tasks` table)
-Runtime instances of individual blocks within an execution.
-- `id`: UUID (PK)
-- `execution_id`: UUID (FK)
-- `block_id`: String (Reference to graph node ID)
-- `status`: Enum (`PENDING`, `RUNNING`, `SUCCESS`, `FAILED`)
-- `logs`: Text (Stored output/stderr)
-- `output_metadata`: JSONB (e.g., `{"type": "S3_FILE", "path": "s3://..."}`)
+# Методология Разработки
+1. **Вертикальные Срезы:** Делаем полностью рабочие фичи по очереди (не "весь бэкенд", а "коннекторы готовы").
+2. **Тесты Сразу:** Для каждой новой логики пишем юнит/интеграционные тесты (pytest + testcontainers).
+3. **Маленькие Шаги:** Пишем код по 1-2 файла за ответ. Если не влезает — останавливаемся и спрашиваем.
+4. **Контекст:** Используем файл `AI_CONTEXT.md` для сохранения состояния между сессиями.
 
-## 5. Block System & Data Contracts
+# Задание для Текущей Сессии (Шаг 1 из 6)
+**Цель:** Подготовить инфраструктуру и базовую структуру проекта.
 
-Blocks are the atomic units of processing. Each block has defined **Input Ports** and **Output Ports** with strict types.
+1. **Создай `docker-compose.yml`** со сервисами:
+   - PostgreSQL (метаданные)
+   - Redis (брокер для Celery)
+   - MinIO (S3 хранилище)
+   - Spark Master + Spark Worker
+   - Backend (FastAPI)
+   - Celery Worker
+   - Frontend (React)
+   
+2. **Создай структуру директорий** (как указано выше) с пустыми `__init__.py` файлами.
 
-### 5.1. Data Types (Contracts)
-1.  `DB_TABLE`: Reference to a table/query result within a specific DB Connection.
-2.  `S3_FILE`: Reference to a file path in Object Storage (e.g., `s3://bucket/path/file.parquet`).
-3.  `ML_MODEL`: Reference to a serialized model artifact in Object Storage.
-4.  `TRIGGER`: No data, used for scheduling/manual start.
+3. **Напиши модели SQLAlchemy** для: `Connection`, `Pipeline`, `PipelineRun`, `NodeRun`.
 
-### 5.2. Standard Block Types
-| Block Name | Input Type | Output Type | Description |
-| :--- | :--- | :--- | :--- |
-| `DB Extract` | `TRIGGER` | `S3_FILE` | Connects to DB, runs SQL, exports result to Parquet in S3. |
-| `S3 Transform` | `S3_FILE` | `S3_FILE` | Runs Python/Pandas script on file in S3, saves new file. |
-| `DB Transform` | `DB_TABLE` | `DB_TABLE` | Executes SQL (CREATE TABLE AS) inplace within the DB. |
-| `CatBoost Train` | `S3_FILE` | `ML_MODEL` | Trains model on dataset from S3, saves artifact to S3. |
-| `DB Load` | `S3_FILE` | `DB_TABLE` | Loads data from S3 file into DB table. |
-| `S3 Source` | `TRIGGER` | `S3_FILE` | References an existing file in S3. |
+4. **Создай `AI_CONTEXT.md`** с начальным статусом проекта.
 
-### 5.3. Execution Logic
-1.  **Orchestrator** parses the graph, performs topological sort.
-2.  **Celery Tasks** are dispatched based on dependencies.
-3.  **Workers** execute the logic. 
-    *   If Block requires S3: Worker uses `boto3` to read/write from MinIO.
-    *   If Block requires DB: Worker uses `sqlalchemy` to connect to external DB.
-4.  **Metadata Passing:** The output of one block (e.g., S3 path) is passed as input configuration to the dependent block via the Orchestrator.
+5. **Напиши `README.md`** с инструкцией по запуску и архитектурной схемой.
 
-## 6. API Structure (FastAPI)
+# Требования к Коду
+- Асинхронный код там, где возможно (FastAPI, SQLAlchemy).
+- Валидация через Pydantic v2.
+- Логирование через `logging` модуль с JSON-форматом.
+- Типизация через Python type hints.
+- Конфигурация через `.env` файлы (pydantic-settings).
+- Тесты с использованием `testcontainers` для интеграции.
 
-### Auth
-- `POST /api/v1/auth/login`
-- `POST /api/v1/auth/register`
+# Ограничения
+- Не выдумывай несуществующие библиотеки.
+- Если код не влезает в ответ — остановись и спроси продолжения.
+- После каждого файла кратко объясни, что он делает.
+- Для Spark используй Standalone режим в Docker (не Kubernetes).
 
-### Connections
-- `GET /api/v1/connections`
-- `POST /api/v1/connections` (Encrypts config before save)
-- `DELETE /api/v1/connections/{id}`
-- `POST /api/v1/connections/{id}/test` (Validate connectivity)
+# Формат Ответа
+1. Сначала перечисли файлы, которые будешь создавать.
+2. Пиши код по одному файлу за раз.
+3. После каждого файла — краткое пояснение.
+4. В конце сессии — итог и обновленный `AI_CONTEXT.md`.
 
-### Pipelines
-- `GET /api/v1/pipelines`
-- `POST /api/v1/pipelines`
-- `PUT /api/v1/pipelines/{id}`
-- `POST /api/v1/pipelines/{id}/run` (Triggers execution)
-
-### Executions
-- `GET /api/v1/executions/{id}` (Get status)
-- `GET /api/v1/executions/{id}/logs` (Stream logs)
-
-## 7. Frontend Requirements (React)
-
-1.  **Graph Editor:** 
-    - Use `React Flow`.
-    - Custom Nodes for each Block Type (display icon, status, config button).
-    - **Validation:** Prevent connecting incompatible ports (e.g., `DB_TABLE` output cannot connect to `CatBoost` input).
-2.  **Configuration Drawer:** 
-    - When a node is selected, show a side panel with form fields based on block type (e.g., SQL Editor for DB Extract, Python Editor for Transform).
-3.  **Dashboard:** 
-    - List of pipelines with last run status.
-    - Execution history view with logs per task.
-
-## 8. Security & Secrets Management
-- **Encryption:** Use `cryptography.fernet` for encrypting `config` JSON in `connections` table.
-- **Key Management:** Encryption key stored in Environment Variable `ENCRYPTION_KEY` (not in code).
-- **Network:** Services communicate via Docker internal network. MinIO and Postgres are not exposed to public host ports unless necessary for debugging.
-
-## 9. Directory Structure
-
-```text
-/project-root
-  /backend
-    /app
-      /api            # FastAPI routers
-      /core           # Config, Security, Encryption
-      /db             # SQLAlchemy models, session
-      /workers        # Celery tasks, Block logic implementations
-      /services       # S3 Client, DB Connectors
-    Dockerfile
-    requirements.txt
-  /frontend
-    /src
-      /components     # React Flow nodes, UI components
-      /hooks          # Custom hooks
-      /api            # Axios instances
-    Dockerfile
-  /docker
-    worker.Dockerfile # Includes ML libs (catboost, pandas)
-  docker-compose.yml
-  SPEC.md             # This file
-  README.md
+# Начни работу
+Подтверди, что понял задачу, и начни с создания `docker-compose.yml` и структуры директорий.

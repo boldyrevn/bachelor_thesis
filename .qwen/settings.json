@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(mkdir *)",
+      "Bash(touch *)",
+      "Bash(ruff *)",
+      "Bash(source *)",
+      "Bash(pip install *)",
+      "Bash(pytest *)",
+      "Bash(git add *)"
+    ]
+  },
+  "$version": 3
+}
