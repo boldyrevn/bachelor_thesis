@@ -192,4 +192,5 @@ SPARK_MASTER=spark://localhost:7077
 3. **Run Ruff Formatter** — After writing backend code, run `ruff format backend/` to ensure consistent code style
 4. **Explain Before Changing on User Questions** — When the user asks a clarifying question about implementation decisions, first explain the reasoning behind the original implementation, then ask if they want it changed before making modifications
 5. **Test Strategy** — Use testcontainers for integration tests that require any external connections (database, Redis, S3, etc.). Unit tests should only test pure functions without any external dependencies or mocking
-6. **End of Session Protocol** — At the end of a session, make a git commit with all changes. Do not start tasks from the next session; instead, offer to complete or compact the current session
+6. **Clean Before Session End** — Before offering to end or continue a session, clean `__pycache__` directories: `find . -type d -name "__pycache__" -exec rm -rf {} +`
+7. **End of Session Protocol** — At the end of a session, make a git commit with all changes. Do not start tasks from the next session; instead, offer to complete or compact the current session
