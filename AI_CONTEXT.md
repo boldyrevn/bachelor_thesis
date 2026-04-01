@@ -185,6 +185,8 @@ SPARK_MASTER=spark://localhost:7077
 
 ## Development Rules
 
+**⚠️ IMPORTANT:** The AI agent MUST strictly follow all development rules below. These are mandatory requirements, not suggestions.
+
 1. **Run Tests After Backend Implementation** — After writing backend functionality and tests, always run `pytest` to verify correctness
 2. **Update AI_CONTEXT.md** — After completing each major task block, update this file with progress and changes
 3. **Run Ruff Formatter** — After writing backend code, run `ruff format backend/` to ensure consistent code style
