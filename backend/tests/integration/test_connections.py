@@ -332,13 +332,13 @@ class TestConnectionCRUD:
 class TestConnectionTestEndpoint:
     """Test connection testing endpoint."""
 
-    async def test_test_connection(
+    async def test_test_connection_postgres(
         self, client: AsyncClient, db_session: AsyncSession
     ) -> None:
-        """Test testing a connection (will likely fail without real credentials)."""
+        """Test testing a PostgreSQL connection."""
         # Create a connection with invalid credentials
         payload = {
-            "name": "test-test-conn",
+            "name": "test-test-postgres",
             "connection_type": "postgres",
             "config": {
                 "host": "localhost",
@@ -359,5 +359,93 @@ class TestConnectionTestEndpoint:
         assert "success" in data
         assert "message" in data
         # Connection should fail (invalid credentials)
+        assert data["success"] is False
+        assert "error" in data
+
+    async def test_test_connection_clickhouse(
+        self, client: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        """Test testing a ClickHouse connection."""
+        payload = {
+            "name": "test-test-clickhouse",
+            "connection_type": "clickhouse",
+            "config": {
+                "host": "localhost",
+                "port": 8123,
+                "database": "default",
+                "username": "default",
+            },
+            "secrets": {"password": "wrong_password"},
+        }
+        create_response = await client.post("/api/v1/connections", json=payload)
+        connection_id = create_response.json()["id"]
+
+        # Test the connection
+        response = await client.post(f"/api/v1/connections/{connection_id}/test")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert "success" in data
+        assert "message" in data
+        # Connection should fail (invalid credentials)
+        assert data["success"] is False
+        assert "error" in data
+
+    async def test_test_connection_s3(
+        self, client: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        """Test testing an S3 connection."""
+        payload = {
+            "name": "test-test-s3",
+            "connection_type": "s3",
+            "config": {
+                "endpoint": "s3.amazonaws.com",
+                "region": "us-east-1",
+                "default_bucket": "nonexistent-bucket-xyz123",
+            },
+            "secrets": {
+                "access_key": "AKIAIOSFODNN7EXAMPLE",
+                "secret_key": "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+            },
+        }
+        create_response = await client.post("/api/v1/connections", json=payload)
+        connection_id = create_response.json()["id"]
+
+        # Test the connection
+        response = await client.post(f"/api/v1/connections/{connection_id}/test")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert "success" in data
+        assert "message" in data
+        # Connection should fail (invalid credentials)
+        assert data["success"] is False
+        assert "error" in data
+
+    async def test_test_connection_spark(
+        self, client: AsyncClient, db_session: AsyncSession
+    ) -> None:
+        """Test testing a Spark connection."""
+        payload = {
+            "name": "test-test-spark",
+            "connection_type": "spark",
+            "config": {
+                "master_url": "spark://nonexistent-host:7077",
+                "app_name": "TestApp",
+                "deploy_mode": "client",
+            },
+            "secrets": {},
+        }
+        create_response = await client.post("/api/v1/connections", json=payload)
+        connection_id = create_response.json()["id"]
+
+        # Test the connection
+        response = await client.post(f"/api/v1/connections/{connection_id}/test")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert "success" in data
+        assert "message" in data
+        # Connection should fail (unreachable host)
         assert data["success"] is False
         assert "error" in data

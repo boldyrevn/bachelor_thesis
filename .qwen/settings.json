@@ -7,7 +7,9 @@
       "Bash(source *)",
       "Bash(pip install *)",
       "Bash(pytest *)",
-      "Bash(git add *)"
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(find *)"
     ]
   },
   "$version": 3
