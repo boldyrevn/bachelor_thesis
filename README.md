@@ -38,11 +38,11 @@ FlowForge — это платформа для визуального проек
 Каждая нода — независимая задача, которая читает из хранилища, обрабатывает и пишет результат.
 
 ### 2. Коннекторы
-Централизованное хранение учетных данных:
-- PostgreSQL
-- ClickHouse
-- S3 (MinIO)
-- Spark
+Централизованное хранение учетных данных (секреты кодируются в base64):
+- **PostgreSQL** — хост, порт, база данных, пользователь, пароль
+- **ClickHouse** — хост, порт, база данных, пользователь, пароль
+- **S3** — endpoint, access key, secret key, регион, бакет
+- **Spark** — master URL, app name, deploy mode
 
 ### 3. Типизированные Артефакты
 Ноды декларируют выходы с типами:
@@ -111,7 +111,7 @@ docker-compose down
 
 - **Frontend:** http://localhost:3000
 - **API Docs:** http://localhost:8000/docs
-- **MinIO Console:** http://localhost:9001 (admin / flowforge_secret)
+- **MinIO Console:** http://localhost:9001 (flowforge_admin / flowforge_secret)
 - **Spark UI:** http://localhost:8080
 
 ## Структура Проекта
@@ -121,16 +121,22 @@ docker-compose down
 ├── backend/
 │   ├── app/
 │   │   ├── api/           # FastAPI endpoints
+│   │   │   ├── connections.py    # Connection CRUD API
+│   │   │   ├── demo.py           # Demo endpoints
+│   │   │   └── dependencies.py   # API dependencies
 │   │   ├── core/          # Config, security, logging
 │   │   ├── models/        # SQLAlchemy models
 │   │   ├── schemas/       # Pydantic schemas
+│   │   │   └── connection.py     # Connection type schemas
 │   │   ├── connections/   # Connection managers
+│   │   │   └── service.py        # Connection testing service
 │   │   ├── nodes/         # Node implementations
 │   │   ├── orchestration/ # Graph resolution, context
 │   │   └── workers/       # Celery tasks
 │   ├── tests/
 │   │   ├── unit/
 │   │   ├── integration/
+│   │   │   └── test_connections.py  # Connection API tests
 │   │   └── conftest.py
 │   ├── requirements.txt
 │   └── pytest.ini
@@ -224,6 +230,54 @@ pytest -m integration
 pytest --cov=app --cov-report=html
 ```
 
+## API Endpoints
+
+### Connections API
+
+| Метод | Endpoint | Описание |
+|-------|----------|----------|
+| POST | `/api/v1/connections` | Создать новый коннектор |
+| GET | `/api/v1/connections` | Получить список всех коннекторов |
+| GET | `/api/v1/connections/{id}` | Получить коннектор по ID |
+| PUT | `/api/v1/connections/{id}` | Обновить коннектор |
+| DELETE | `/api/v1/connections/{id}` | Удалить коннектор |
+| POST | `/api/v1/connections/{id}/test` | Протестировать соединение |
+
+#### Пример создания PostgreSQL коннектора
+
+```bash
+curl -X POST http://localhost:8000/api/v1/connections \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "my-postgres",
+    "connection_type": "postgres",
+    "config": {
+      "host": "localhost",
+      "port": 5432,
+      "database": "mydb",
+      "username": "user"
+    },
+    "secrets": {
+      "password": "mypassword"
+    },
+    "description": "Production PostgreSQL"
+  }'
+```
+
+#### Пример тестирования соединения
+
+```bash
+curl -X POST http://localhost:8000/api/v1/connections/{id}/test
+```
+
+Ответ:
+```json
+{
+  "success": true,
+  "message": "Successfully connected to PostgreSQL at localhost:5432"
+}
+```
+
 ## Roadmap
 
 ### Session 1 — Infrastructure ✅
@@ -232,12 +286,13 @@ pytest --cov=app --cov-report=html
 - SQLAlchemy модели
 - Базовая конфигурация
 
-### Session 2 — Connections API
-- CRUD для коннекторов
-- Тестирование соединений
-- MinIO клиент
+### Session 2 — Connection CRUD API ✅
+- Pydantic схемы для валидации конфигов/секретов
+- CRUD API для коннекторов (POST, GET, PUT, DELETE)
+- Сервис тестирования соединений
+- Интеграционные тесты с testcontainers (14 тестов)
 
-### Session 3 — Pipeline Editor
+### Session 3 — Pipeline Editor (В разработке)
 - React Flow интеграция
 - Визуальный редактор нод
 - Валидация графа
@@ -257,6 +312,15 @@ pytest --cov=app --cov-report=html
 - UI улучшения
 - Документация
 - Финальное тестирование
+
+## Вклад в Проект
+
+### Правила Разработки
+
+1. **Тесты после реализации** — После написания функционала всегда запускайте `pytest`
+2. **Форматирование** — Используйте `ruff format backend/` для форматирования кода
+3. **Интеграционные тесты** — Используйте testcontainers для тестов с внешними зависимостями
+4. **Юнит-тесты** — Тестируйте только чистые функции без внешних зависимостей
 
 ## Лицензия
 
