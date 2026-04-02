@@ -120,12 +120,43 @@ Project context for AI-assisted development sessions.
 | `ConnectionUpdateRequest` | Request model for updating connection |
 | `ConnectionTestResult` | Result of connection test |
 
-## Next Steps (Session 3)
+### Session 3 — Frontend Connections Page ✅ COMPLETED
 
-1. Create TypeScript types for connections
-2. Create API client for connections
-3. Create Connections page component with form and test functionality
-4. Update App.tsx with routing
+**Goal:** Create frontend Connections page with CRUD operations.
+
+**Completed Files:**
+- ✅ `frontend/src/types/connection.ts` — TypeScript types for connections
+- ✅ `frontend/src/api/connections.ts` — API client for connections endpoints
+- ✅ `frontend/src/components/ConnectionsPage.tsx` — Connections page with list, add/edit modal, test, delete
+- ✅ `frontend/src/App.tsx` — Updated with React Router and AppShell navigation
+- ✅ `frontend/src/main.tsx` — Added QueryClientProvider and Notifications
+
+**Features Implemented:**
+- Connection list table with type badges
+- Add/Edit modal with dynamic form fields per connection type
+- Test button with toast notifications (individual loading state per connection)
+- Delete functionality with confirmation
+- React Router navigation with Mantine AppShell layout
+- Dynamic form fields:
+  - PostgreSQL: host, port, database, username, password
+  - ClickHouse: host, port, database, username, password
+  - S3: endpoint, region, default_bucket, use_ssl (switch), access_key, secret_key
+  - Spark: master_url, app_name, deploy_mode, spark_home
+
+**Fixes Applied:**
+- Added `QueryClientProvider` wrapper (fixed white screen error)
+- Added `use_ssl` field to `S3Config` schema and frontend type
+- Fixed test button loading state to show only for clicked connection
+
+**Dependencies Added:**
+- `@mantine/notifications` — Toast notifications
+
+## Next Steps (Session 4)
+
+1. Create Pipeline and Node models/schemas (if not already done)
+2. Implement Pipeline CRUD API
+3. Create Pipeline list page
+4. Implement Pipeline editor with @xyflow/react (node-based DAG editor)
 
 ## File Structure
 
