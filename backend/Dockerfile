@@ -1,4 +1,4 @@
-FROM python:3.11-slim
+FROM python:3.11-slim-bookworm
 
 WORKDIR /app
 
@@ -6,11 +6,11 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
     libpq-dev \
-    openjdk-11-jdk-headless \
+    openjdk-17-jdk-headless \
     && rm -rf /var/lib/apt/lists/*
 
 # Set JAVA_HOME environment variable
-ENV JAVA_HOME=/usr/lib/jvm/java-11-openjdk-amd64
+ENV JAVA_HOME=/usr/lib/jvm/java-17-openjdk-arm64
 
 # Copy requirements and install Python dependencies
 COPY requirements.txt .
