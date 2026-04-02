@@ -227,3 +227,29 @@ SPARK_MASTER=spark://localhost:7077
 7. **Clean Before Session End** — Before offering to end or continue a session, clean `__pycache__` directories: `find . -type d -name "__pycache__" -exec rm -rf {} +`
 8. **End of Session Protocol** — At the end of a session, make a git commit with all changes. Do not start tasks from the next session; instead, offer to complete or compact the current session
 9. **Verify Frontend Changes** — Before committing frontend changes, ask the user to verify the fix works in their browser
+10. **Ask on Architectural Decisions** — When facing important architectural or implementation decisions (e.g., API design, technology choices, complex patterns), the agent MUST ask the user for preference before implementing. Do not assume — explain options and wait for confirmation.
+
+## Session 4 — Pipeline Backend + Frontend Editor
+
+**Goal:** Implement pipeline execution engine with node architecture and visual editor.
+
+### Backend Tasks
+1. **Node Architecture** — Base class, registry, text output node (Hello World via Celery)
+2. **Pipeline Execution** — Executor, graph resolver (topological sort, cycle detection), template resolver `{{ node_id.output }}`
+3. **Pipeline CRUD API** — Create, read, update, delete, run pipeline
+4. **Real-time Logs** — SSE streaming for pipeline run logs
+5. **Integration Tests** — Test execution, template resolution, log streaming
+
+### Frontend Tasks
+6. **Types & API Client** — Pipeline/Node types, CRUD + run + SSE log client
+7. **Pipeline List Page** — List, create, delete pipelines
+8. **Pipeline Editor** — @xyflow/react node editor, drag-and-drop, node configuration, save/run, real-time log viewer
+
+### Key Requirements
+- Each node runs as isolated Celery task
+- Template syntax: `{{ node_id.output_name }}` for cross-node references
+- Real-time log streaming (SSE or WebSocket — ask user for preference)
+- Graph validation: detect cycles, validate connections
+- Follow Development Rules (tests, formatting, commits)
+
+**Start with Task 1 (Node Architecture).**
