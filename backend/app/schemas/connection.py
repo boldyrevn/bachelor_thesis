@@ -100,6 +100,7 @@ class S3Config(BaseModel):
     endpoint: str = Field(..., description="S3 endpoint URL")
     region: str = Field(default="us-east-1", description="AWS region")
     default_bucket: str = Field(..., description="Default bucket name")
+    use_ssl: bool = Field(default=True, description="Use SSL for connection")
 
     class Config:
         json_schema_extra = {
@@ -107,6 +108,7 @@ class S3Config(BaseModel):
                 "endpoint": "s3.amazonaws.com",
                 "region": "us-east-1",
                 "default_bucket": "my-bucket",
+                "use_ssl": True,
             }
         }
 

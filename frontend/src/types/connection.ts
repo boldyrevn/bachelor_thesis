@@ -49,6 +49,7 @@ export interface S3Config {
   endpoint: string;
   region: string;
   default_bucket: string;
+  use_ssl?: boolean;
 }
 
 /**

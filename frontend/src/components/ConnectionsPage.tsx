@@ -17,6 +17,8 @@ import {
   Center,
   Container,
   rem,
+  Switch,
+  Box,
 } from '@mantine/core';
 import { useForm } from '@mantine/form';
 import { notifications } from '@mantine/notifications';
@@ -48,7 +50,7 @@ const CONNECTION_TYPE_FIELDS: Record<
     secrets: ['password'],
   },
   [ConnectionType.S3]: {
-    config: ['endpoint', 'region', 'default_bucket'],
+    config: ['endpoint', 'region', 'default_bucket', 'use_ssl'],
     secrets: ['access_key', 'secret_key'],
   },
   [ConnectionType.SPARK]: {
@@ -63,6 +65,7 @@ const CONNECTION_TYPE_FIELDS: Record<
 export function ConnectionsPage() {
   const [modalOpened, setModalOpened] = useState(false);
   const [editingConnection, setEditingConnection] = useState<ConnectionResponse | null>(null);
+  const [testingConnectionId, setTestingConnectionId] = useState<string | null>(null);
   const queryClient = useQueryClient();
 
   // Fetch connections
@@ -145,7 +148,13 @@ export function ConnectionsPage() {
 
   // Test mutation
   const testMutation = useMutation({
-    mutationFn: (id: string) => connectionsApi.test(id),
+    mutationFn: (id: string) => {
+      setTestingConnectionId(id);
+      return connectionsApi.test(id);
+    },
+    onSettled: () => {
+      setTestingConnectionId(null);
+    },
     onSuccess: (result) => {
       notifications.show({
         title: result.success ? 'Connection Test Passed' : 'Connection Test Failed',
@@ -275,7 +284,7 @@ export function ConnectionsPage() {
                           variant="outline"
                           leftSection={<IconPlayerPlay size={rem(14)} />}
                           onClick={() => handleTest(connection)}
-                          loading={testMutation.isPending}
+                          loading={testingConnectionId === connection.id}
                         >
                           Test
                         </Button>
@@ -350,19 +359,34 @@ export function ConnectionsPage() {
 
             <Title order={5}>Configuration</Title>
             {connectionTypeFields.config.map((field) => (
-              <TextInput
-                key={field}
-                label={field.charAt(0).toUpperCase() + field.slice(1).replace('_', ' ')}
-                placeholder={field}
-                value={form.values.config[field] || ''}
-                onChange={(e) =>
-                  form.setFieldValue('config', {
-                    ...form.values.config,
-                    [field]: e.target.value,
-                  })
-                }
-                required={field !== 'spark_home'}
-              />
+              field === 'use_ssl' ? (
+                <Box key={field}>
+                  <Switch
+                    label={field.charAt(0).toUpperCase() + field.slice(1).replace('_', ' ')}
+                    checked={!!form.values.config[field]}
+                    onChange={(e) =>
+                      form.setFieldValue('config', {
+                        ...form.values.config,
+                        [field]: e.currentTarget.checked,
+                      })
+                    }
+                  />
+                </Box>
+              ) : (
+                <TextInput
+                  key={field}
+                  label={field.charAt(0).toUpperCase() + field.slice(1).replace('_', ' ')}
+                  placeholder={field}
+                  value={form.values.config[field] || ''}
+                  onChange={(e) =>
+                    form.setFieldValue('config', {
+                      ...form.values.config,
+                      [field]: e.target.value,
+                    })
+                  }
+                  required={field !== 'spark_home'}
+                />
+              )
             ))}
 
             {connectionTypeFields.secrets.length > 0 && (

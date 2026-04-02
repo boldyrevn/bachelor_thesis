@@ -9,7 +9,11 @@
       "Bash(pytest *)",
       "Bash(git add *)",
       "Bash(git commit *)",
-      "Bash(find *)"
+      "Bash(find *)",
+      "Bash(npm install)",
+      "Bash(ls *)",
+      "Bash(docker run *)",
+      "Bash(docker build *)"
     ]
   },
   "$version": 3
