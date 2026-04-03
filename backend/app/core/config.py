@@ -22,7 +22,9 @@ class Settings(BaseSettings):
     DEBUG: bool = False
 
     # Database
-    DATABASE_URL: str = "postgresql+asyncpg://flowforge:flowforge_secret@localhost:5432/flowforge"
+    DATABASE_URL: str = (
+        "postgresql+asyncpg://flowforge:flowforge_secret@localhost:5432/flowforge"
+    )
 
     # Redis
     REDIS_URL: str = "redis://localhost:6379/0"

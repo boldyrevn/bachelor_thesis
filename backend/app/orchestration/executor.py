@@ -1,0 +1,382 @@
+"""Local node executor using ProcessPoolExecutor (like Airflow LocalExecutor).
+
+This module provides a Celery-free way to execute nodes in isolated processes.
+Useful for testing and single-machine deployments.
+
+Supports real-time log streaming via multiprocessing.Queue.
+"""
+
+import asyncio
+import logging
+import multiprocessing as mp
+from concurrent.futures import ProcessPoolExecutor
+from dataclasses import dataclass
+from multiprocessing import Queue
+from typing import Any, AsyncGenerator, Optional
+
+from app.nodes.base import NodeContext, NodeResult
+from app.nodes.registry import NodeRegistry
+from app.orchestration.logger import create_streaming_logger
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass
+class LogMessage:
+    """A log message from node execution."""
+
+    pipeline_run_id: str
+    node_id: str
+    message: str
+    level: str = "INFO"
+
+
+def _execute_node_in_process(
+    node_type: str,
+    node_config: dict[str, Any],
+    pipeline_params: dict[str, Any],
+    upstream_outputs: dict[str, dict[str, Any]],
+    log_queue: Optional[Queue] = None,
+    pipeline_run_id: str = "",
+    node_id: str = "",
+) -> dict[str, Any]:
+    """Execute a node in a separate process with optional log streaming.
+
+    This function is called inside the process pool. It imports the node
+    registry and executes the node in complete isolation.
+
+    Args:
+        node_type: Type of node to execute
+        node_config: Node configuration
+        pipeline_params: Pipeline parameters
+        upstream_outputs: Outputs from upstream nodes
+        log_queue: Optional queue for streaming logs
+        pipeline_run_id: Pipeline run ID for log context
+        node_id: Node ID for log context
+
+    Returns:
+        Dictionary with execution result
+    """
+    from app.nodes.base import NodeContext
+    from app.nodes.registry import NodeRegistry
+
+    # Create logger with queue handler if provided
+    py_logger: logging.Logger | None = None
+    if log_queue is not None:
+
+        def on_log(message: str) -> None:
+            log_queue.put(
+                LogMessage(
+                    pipeline_run_id=pipeline_run_id,
+                    node_id=node_id,
+                    message=message,
+                    level="INFO",
+                )
+            )
+
+        py_logger = create_streaming_logger(f"node.{node_id}", on_log)
+
+    try:
+        node = NodeRegistry.create(node_type)
+        node.validate_config(node_config)
+
+        full_params = {**pipeline_params, "node_config": node_config}
+        context = NodeContext(
+            pipeline_id=full_params.get("_pipeline_id", ""),
+            pipeline_run_id=full_params.get("_pipeline_run_id", pipeline_run_id),
+            node_id=full_params.get("_node_id", node_id),
+            pipeline_params=full_params,
+            upstream_outputs=upstream_outputs,
+        )
+
+        result = node.execute(context, logger=py_logger)
+
+        return {
+            "success": result.success,
+            "outputs": result.outputs,
+            "logs": result.logs,
+            "error": result.error,
+        }
+
+    except KeyError as e:
+        error_msg = f"Unknown node type: {node_type}"
+        if log_queue:
+            log_queue.put(
+                LogMessage(
+                    pipeline_run_id=pipeline_run_id,
+                    node_id=node_id,
+                    message=error_msg,
+                    level="ERROR",
+                )
+            )
+        return {
+            "success": False,
+            "outputs": {},
+            "logs": [f"Error: {error_msg}"],
+            "error": error_msg,
+        }
+
+    except ValueError as e:
+        error_msg = f"Configuration validation failed: {str(e)}"
+        if log_queue:
+            log_queue.put(
+                LogMessage(
+                    pipeline_run_id=pipeline_run_id,
+                    node_id=node_id,
+                    message=error_msg,
+                    level="ERROR",
+                )
+            )
+        return {
+            "success": False,
+            "outputs": {},
+            "logs": [f"Error: {error_msg}"],
+            "error": error_msg,
+        }
+
+    except Exception as e:
+        error_msg = f"Unexpected error: {str(e)}"
+        if log_queue:
+            log_queue.put(
+                LogMessage(
+                    pipeline_run_id=pipeline_run_id,
+                    node_id=node_id,
+                    message=error_msg,
+                    level="ERROR",
+                )
+            )
+        return {
+            "success": False,
+            "outputs": {},
+            "logs": [f"Error: {error_msg}"],
+            "error": error_msg,
+        }
+
+
+class NodeExecutor:
+    """Executes nodes in isolated processes with optional log streaming.
+
+    Similar to Airflow's LocalExecutor, this runs tasks in a process pool
+    without requiring Celery infrastructure.
+
+    Usage:
+        async with NodeExecutor(max_workers=4) as executor:
+            # Simple execution
+            result = await executor.execute_node(...)
+
+            # Or with streaming
+            async for logs, result in executor.execute_node_with_streaming(...):
+                if logs:
+                    print(f"Logs: {logs}")
+                else:
+                    print(f"Result: {result}")
+    """
+
+    def __init__(self, max_workers: int = 4):
+        """Initialize the executor.
+
+        Args:
+            max_workers: Maximum number of concurrent worker processes
+        """
+        self.max_workers = max_workers
+        self._executor: ProcessPoolExecutor | None = None
+
+    def _get_executor(self) -> ProcessPoolExecutor:
+        """Get or create the process pool executor."""
+        if self._executor is None:
+            self._executor = ProcessPoolExecutor(max_workers=self.max_workers)
+        return self._executor
+
+    async def execute_node(
+        self,
+        node_type: str,
+        node_config: dict[str, Any],
+        pipeline_params: dict[str, Any],
+        upstream_outputs: dict[str, dict[str, Any]],
+    ) -> dict[str, Any]:
+        """Execute a node in a separate process without streaming.
+
+        Args:
+            node_type: Type of node to execute
+            node_config: Node-specific configuration
+            pipeline_params: Pipeline-level parameters
+            upstream_outputs: Outputs from upstream nodes
+
+        Returns:
+            Dictionary with execution result
+        """
+        loop = asyncio.get_event_loop()
+        executor = self._get_executor()
+
+        future = loop.run_in_executor(
+            executor,
+            _execute_node_in_process,
+            node_type,
+            node_config,
+            pipeline_params,
+            upstream_outputs,
+            None,
+            "",
+            "",
+        )
+
+        return await future
+
+    async def execute_node_with_streaming(
+        self,
+        node_type: str,
+        node_config: dict[str, Any],
+        pipeline_params: dict[str, Any],
+        upstream_outputs: dict[str, dict[str, Any]],
+        pipeline_run_id: str = "",
+        node_id: str = "",
+    ) -> AsyncGenerator[tuple[list[LogMessage], dict[str, Any] | None], None]:
+        """Execute a node with real-time log streaming.
+
+        Yields log messages as they are produced, then yields the final result.
+
+        Args:
+            node_type: Type of node to execute
+            node_config: Node configuration
+            pipeline_params: Pipeline parameters
+            upstream_outputs: Upstream node outputs
+            pipeline_run_id: Pipeline run ID for log context
+            node_id: Node ID for log context
+
+        Yields:
+            Tuples of (logs, result) where:
+                - logs: List of LogMessage objects (empty for final result yield)
+                - result: Final execution result (None for log-only yields)
+        """
+        # Create manager and queue for log streaming
+        manager = mp.Manager()
+        log_queue = manager.Queue()
+
+        loop = asyncio.get_event_loop()
+        executor = self._get_executor()
+
+        future = loop.run_in_executor(
+            executor,
+            _execute_node_in_process,
+            node_type,
+            node_config,
+            pipeline_params,
+            upstream_outputs,
+            log_queue,
+            pipeline_run_id,
+            node_id,
+        )
+
+        collected_logs: list[LogMessage] = []
+
+        # Poll for logs while task is running
+        while not future.done():
+            while not log_queue.empty():
+                log_msg = log_queue.get_nowait()
+                collected_logs.append(log_msg)
+                yield [log_msg], None
+
+            await asyncio.sleep(0.05)
+
+        # Get final result
+        result = await future
+
+        # Drain any remaining logs
+        while not log_queue.empty():
+            log_msg = log_queue.get_nowait()
+            collected_logs.append(log_msg)
+            yield [log_msg], None
+
+        # Yield final result (with empty logs list to signal completion)
+        yield [], result
+
+        # Cleanup
+        manager.shutdown()
+
+    async def execute_nodes(
+        self,
+        nodes: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """Execute multiple nodes concurrently.
+
+        Args:
+            nodes: List of node execution specs
+
+        Returns:
+            List of execution results
+        """
+        tasks = [
+            self.execute_node(
+                node_type=node["node_type"],
+                node_config=node["node_config"],
+                pipeline_params=node["pipeline_params"],
+                upstream_outputs=node["upstream_outputs"],
+            )
+            for node in nodes
+        ]
+
+        return await asyncio.gather(*tasks)
+
+    def shutdown(self, wait: bool = True) -> None:
+        """Shutdown the executor."""
+        if self._executor is not None:
+            self._executor.shutdown(wait=wait)
+            self._executor = None
+
+    async def __aenter__(self) -> "NodeExecutor":
+        """Async context manager entry."""
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
+        """Async context manager exit."""
+        self.shutdown(wait=True)
+
+
+_default_executor: NodeExecutor | None = None
+
+
+def get_default_executor(max_workers: int = 4) -> NodeExecutor:
+    """Get or create the default executor."""
+    global _default_executor
+    if _default_executor is None:
+        _default_executor = NodeExecutor(max_workers=max_workers)
+    return _default_executor
+
+
+async def execute_node_local(
+    node_type: str,
+    node_config: dict[str, Any],
+    pipeline_params: dict[str, Any],
+    upstream_outputs: dict[str, dict[str, Any]],
+    max_workers: int = 4,
+) -> dict[str, Any]:
+    """Execute a node locally without Celery."""
+    executor = get_default_executor(max_workers=max_workers)
+    return await executor.execute_node(
+        node_type=node_type,
+        node_config=node_config,
+        pipeline_params=pipeline_params,
+        upstream_outputs=upstream_outputs,
+    )
+
+
+async def execute_node_with_streaming(
+    node_type: str,
+    node_config: dict[str, Any],
+    pipeline_params: dict[str, Any],
+    upstream_outputs: dict[str, dict[str, Any]],
+    pipeline_run_id: str = "",
+    node_id: str = "",
+    max_workers: int = 4,
+) -> AsyncGenerator[tuple[list[LogMessage], dict[str, Any] | None], None]:
+    """Execute a node with real-time log streaming."""
+    executor = get_default_executor(max_workers=max_workers)
+    async for logs, result in executor.execute_node_with_streaming(
+        node_type=node_type,
+        node_config=node_config,
+        pipeline_params=pipeline_params,
+        upstream_outputs=upstream_outputs,
+        pipeline_run_id=pipeline_run_id,
+        node_id=node_id,
+    ):
+        yield logs, result

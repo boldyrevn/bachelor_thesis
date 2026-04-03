@@ -5,16 +5,17 @@
       "Bash(touch *)",
       "Bash(ruff *)",
       "Bash(source *)",
-      "Bash(pip install *)",
-      "Bash(pytest *)",
       "Bash(git add *)",
       "Bash(git commit *)",
       "Bash(find *)",
-      "Bash(npm install)",
       "Bash(ls *)",
       "Bash(docker run *)",
       "Bash(docker build *)",
-      "Bash(git reset *)"
+      "Bash(git reset *)",
+      "Bash(.venv/bin/pytest *)",
+      "Bash(.venv/bin/pip *)",
+      "Bash(docker ps)",
+      "Bash(.venv/bin/ruff *)"
     ]
   },
   "$version": 3

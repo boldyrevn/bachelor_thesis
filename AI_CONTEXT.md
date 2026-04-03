@@ -208,7 +208,7 @@ SPARK_MASTER=spark://localhost:7077
 
 ## Notes
 
-- Python 3.11 from `.venv/` directory
+- Python 3.11 from `.venv/` directory in project root
 - Project root: `bachelor_thesis/` (current directory)
 - Use async SQLAlchemy 2.0 throughout
 - Pydantic v2 for all validation
@@ -228,6 +228,7 @@ SPARK_MASTER=spark://localhost:7077
 8. **End of Session Protocol** — At the end of a session, make a git commit with all changes. Do not start tasks from the next session; instead, offer to complete or compact the current session
 9. **Verify Frontend Changes** — Before committing frontend changes, ask the user to verify the fix works in their browser
 10. **Ask on Architectural Decisions** — When facing important architectural or implementation decisions (e.g., API design, technology choices, complex patterns), the agent MUST ask the user for preference before implementing. Do not assume — explain options and wait for confirmation.
+11. **Use Project Root venv** — Always use the virtual environment from the project root directory (`.venv/` in `bachelor_thesis/`). Run commands with `.venv/bin/python` or `.venv/bin/pytest` instead of system Python.
 
 ## Session 4 — Pipeline Backend + Frontend Editor
 

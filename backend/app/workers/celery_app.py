@@ -13,6 +13,7 @@ def create_celery_app() -> Celery:
         backend=settings.CELERY_RESULT_BACKEND,
         include=[
             "app.workers.tasks",
+            "app.workers.node_tasks",
         ],
     )
 

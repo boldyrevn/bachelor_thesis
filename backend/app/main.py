@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker, create_async
 
 from app.api.connections import connections_router
 from app.api.demo import demo_router
+from app.api.pipelines import pipelines_router
 from app.core.config import settings, setup_logging
 from app.models.base import Base
 
@@ -79,6 +80,7 @@ def create_app() -> FastAPI:
     # Include routers
     app.include_router(demo_router)
     app.include_router(connections_router)
+    app.include_router(pipelines_router)
 
     return app
 
