@@ -8,8 +8,10 @@ import {
   Title,
 } from '@mantine/core';
 import { useDisclosure } from '@mantine/hooks';
-import { IconDatabase, IconHome } from '@tabler/icons-react';
+import { IconDatabase, IconHome, IconGitBranch } from '@tabler/icons-react';
 import { ConnectionsPage } from './components/ConnectionsPage';
+import { PipelinesPage } from './components/PipelinesPage';
+import { PipelineEditor } from './flows/PipelineEditor';
 
 function Navigation() {
   const location = useLocation();
@@ -29,6 +31,13 @@ function Navigation() {
         label="Connections"
         leftSection={<IconDatabase size={16} />}
         active={location.pathname === '/connections'}
+      />
+      <NavLink
+        component={Link}
+        to="/pipelines"
+        label="Pipelines"
+        leftSection={<IconGitBranch size={16} />}
+        active={location.pathname === '/pipelines'}
       />
     </nav>
   );
@@ -84,6 +93,8 @@ function AppContent() {
         <Routes>
           <Route path="/" element={<HomePage />} />
           <Route path="/connections" element={<ConnectionsPage />} />
+          <Route path="/pipelines" element={<PipelinesPage />} />
+          <Route path="/pipelines/new" element={<PipelineEditor />} />
         </Routes>
       </AppShell.Main>
     </AppShell>

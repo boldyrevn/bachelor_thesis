@@ -16,12 +16,14 @@
 
 6. **Verify Docker Builds** — After modifying Dockerfile or docker-compose.yaml, always attempt to build the image with `docker build` or `docker-compose build` before committing changes
 
-7. **Clean Before Session End** — Before offering to end or continue a session, clean `__pycache__` directories: `find . -type d -name "__pycache__" -exec rm -rf {} +`
+7. **Build Frontend in Docker Only** — NEVER run `npm run build` or `npm install` locally. Always build the frontend inside Docker using `docker build -f frontend/Dockerfile frontend/` or `docker-compose build frontend`
 
-8. **End of Session Protocol** — At the end of a session, make a git commit with all changes. Do not start tasks from the next session; instead, offer to complete or compact the current session
+8. **Clean Before Session End** — Before offering to end or continue a session, clean `__pycache__` directories: `find . -type d -name "__pycache__" -exec rm -rf {} +`
 
-9. **Verify Frontend Changes** — Before committing frontend changes, ask the user to verify the fix works in their browser
+9. **End of Session Protocol** — At the end of a session, make a git commit with all changes. Do not start tasks from the next session; instead, offer to complete or compact the current session
 
-10. **Ask on Architectural Decisions** — When facing important architectural or implementation decisions (e.g., API design, technology choices, complex patterns), the agent MUST ask the user for preference before implementing. Do not assume — explain options and wait for confirmation.
+10. **Verify Frontend Changes** — Before committing frontend changes, ask the user to verify the fix works in their browser
 
-11. **Use Project Root venv** — Always use the virtual environment from the project root directory (`.venv/` in `bachelor_thesis/`). Run commands with `.venv/bin/python` or `.venv/bin/pytest` instead of system Python.
+11. **Ask on Architectural Decisions** — When facing important architectural or implementation decisions (e.g., API design, technology choices, complex patterns), the agent MUST ask the user for preference before implementing. Do not assume — explain options and wait for confirmation.
+
+12. **Use Project Root venv** — Always use the virtual environment from the project root directory (`.venv/` in `bachelor_thesis/`). Run commands with `.venv/bin/python` or `.venv/bin/pytest` instead of system Python.
