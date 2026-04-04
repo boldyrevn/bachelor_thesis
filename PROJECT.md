@@ -73,9 +73,22 @@ backend/
 frontend/
 ├── src/
 │   ├── components/
+│   │   ├── ConnectionsPage.tsx   # Connections CRUD page
+│   │   └── PipelinesPage.tsx     # Pipelines list placeholder
 │   ├── flows/
+│   │   ├── PipelineEditor.tsx    # Main editor with 3-column layout
+│   │   ├── ResizeHandle.tsx      # Draggable panel resize handle
+│   │   ├── ConnectionDragContext.tsx  # Connection drag state context
+│   │   ├── nodes/
+│   │   │   └── FlowNode.tsx      # Custom node (bottom source, top target)
+│   │   └── edges/
+│   │       └── FlowEdge.tsx      # Custom directed edge with arrow
 │   ├── api/
+│   │   ├── client.ts             # Base API client
+│   │   └── connections.ts        # Connections API
 │   └── types/
+│       ├── connection.ts         # Connection types
+│       └── pipeline.ts           # Pipeline/Node/SSE types
 ├── package.json
 └── tsconfig.json
 ```

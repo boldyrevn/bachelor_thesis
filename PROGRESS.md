@@ -140,9 +140,51 @@
 
 ---
 
-## Next Steps (Session 4 continued)
+### Session 5 — Pipeline Editor Frontend ✅ COMPLETED
 
-### Frontend Tasks (6-8)
-6. **Types & API Client** — Pipeline/Node types, CRUD + run + SSE log client
-7. **Pipeline List Page** — List, create, delete pipelines
-8. **Pipeline Editor** — @xyflow/react node editor, drag-and-drop, node configuration, save/run, real-time log viewer
+**Goal:** Implement Pipeline Editor with @xyflow/react, custom nodes, directed edges, and collapsible navbar.
+
+**Completed Files:**
+- ✅ `frontend/src/flows/PipelineEditor.tsx` — Main editor with 3-column resizable layout (params | canvas | node list)
+- ✅ `frontend/src/flows/nodes/FlowNode.tsx` — Custom node with source (bottom) and target (top) handles only
+- ✅ `frontend/src/flows/edges/FlowEdge.tsx` — Custom directed edge with arrow markers
+- ✅ `frontend/src/flows/ConnectionDragContext.tsx` — Context for tracking active connection drag state
+- ✅ `frontend/src/flows/ResizeHandle.tsx` — Draggable resize handle for panel width adjustment
+- ✅ `frontend/src/types/pipeline.ts` — TypeScript types (PipelineNode, GraphDefinition, SSEEvent, RunStatus)
+- ✅ `frontend/src/components/PipelinesPage.tsx` — Placeholder page with "New Pipeline" button
+- ✅ `frontend/src/App.tsx` — Collapsible navbar, breadcrumbs, routing for /pipelines and /pipelines/new
+
+**Features Implemented:**
+- **Custom FlowNode**: Source handle (bottom, output only) and target handle (top, input only)
+- **Directed Edges**: Arrow markers that are light gray by default, dark gray when selected
+- **Green Target Highlight**: Target handles turn green during connection drag (except source node)
+- **ConnectionDragContext**: Tracks which node is being dragged from for real-time UI feedback
+- **3-Column Resizable Layout**: Pipeline params | Canvas | Node list/params with draggable borders
+- **"Add Node" Dropdown**: Button on canvas to add nodes (Text Output, Pipeline Params)
+- **Node Selection**: Click to select, view params in right panel, delete from list
+- **Collapsible Navbar**: Hidden by default, toggled via burger menu in header
+- **Breadcrumbs**: Navigation trail in header (Home > Pipelines > New Pipeline)
+- **PageWrapper**: Consistent padding for non-editor routes, zero padding for editor
+
+**UI/UX Details:**
+- Navbar: Collapsed=60px (icons only), Expanded=250px (icons + labels)
+- Icon positioning: Fixed 20px left offset for stable alignment
+- Active nav item: Blue highlight with rounded corners
+- Arrow button: Centered in 60px container with full-width top border
+
+**Verified:**
+- Docker build successful
+- Manual browser testing at http://localhost:3000/pipelines/new
+
+---
+
+## Next Steps
+
+### Frontend Tasks (remaining)
+6. **Types & API Client** — Pipeline/Node types, CRUD + run + SSE log client (partially done — types created)
+7. **Pipeline List Page** — List, create, delete pipelines (placeholder exists)
+8. **Pipeline Editor** — Node configuration forms, save/load API integration, run + SSE log viewer (canvas done)
+
+### Backend Tasks
+- Pipeline run execution integration
+- SSE log streaming to frontend
