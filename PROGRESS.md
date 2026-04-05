@@ -178,12 +178,130 @@
 
 ---
 
+### Session 6 — Typed Node Parameters, Jinja2 Templates & Auto-Discovery ✅ COMPLETED
+
+**Goal:** Redesign node architecture to use typed input/output schemas with automatic metadata discovery, database persistence, and full Jinja2 template resolution.
+
+**Completed Files:**
+- ✅ `backend/app/nodes/base.py` — Rewritten with Generic[InputT, OutputT], typed schemas, Pydantic validation
+- ✅ `backend/app/nodes/registry.py` — Added scan_nodes() for module discovery
+- ✅ `backend/app/nodes/scanner.py` — NEW: NodeScanner service for DB persistence
+- ✅ `backend/app/nodes/text_output.py` — Refactored to use typed Input/Output schemas
+- ✅ `backend/app/core/template_resolver.py` — NEW: Jinja2 template resolver utility
+- ✅ `backend/app/models/node_type.py` — NEW: NodeType SQLAlchemy model for node metadata
+- ✅ `backend/app/api/node_types.py` — NEW: API endpoints for listing/scanning node types
+- ✅ `backend/app/orchestration/executor.py` — Updated to work with typed parameters + Jinja2 resolution
+- ✅ `backend/app/main.py` — Added startup node scanning hook, fixed logger initialization
+- ✅ `backend/tests/unit/test_nodes.py` — Rewritten for new typed architecture (36 tests)
+- ✅ `backend/tests/integration/test_node_types.py` — NEW: Integration tests for scanner & API (8 tests)
+- ✅ `backend/tests/integration/test_node_execution.py` — Updated for typed schemas + Jinja2
+- ✅ `backend/tests/integration/test_pipelines.py` — Fixed test isolation issue
+- ✅ `docker-compose.yaml` — Removed Redis and Celery services, cleaned backend deps
+
+**Architecture Changes:**
+- **Typed Node Parameters**: Nodes declare `input_schema` and `output_schema` as Pydantic BaseModel classes
+- **Simplified execute()**: `execute(inputs: InputT, logger: logging.Logger) -> OutputT`
+  - No NodeContext - Scheduler will handle context assembly later
+  - No validation in nodes - Executor validates inputs before calling execute()
+  - Node only executes code with validated inputs and logs via logger
+- **Jinja2 Template Resolution**: Full Jinja2 templating for node inputs
+  - `{{ params.name }}` - Pipeline parameters
+  - `{{ node_id.output_name }}` - Upstream node outputs
+  - `{{ params.date | upper }}` - Jinja2 filters
+  - `{% if params.env == 'prod' %}...{% endif %}` - Control structures
+  - Note: Use underscores in node IDs (`node_a` not `node-a`) for Jinja2 compatibility
+- **Node Scanner**: Auto-discovers nodes from `app.nodes` package and persists metadata to DB
+- **NodeType DB Model**: Stores title, description, category, input/output JSON schemas
+- **HTTP API for Frontend**:
+  - `GET /api/v1/node-types` — List all node types with titles, descriptions, categories, input/output JSON schemas
+  - `GET /api/v1/node-types/{id}` — Get specific node type metadata
+  - `POST /api/v1/node-types/scan` — Rescan and sync node metadata to DB
+- **Startup Hook**: Automatically scans and persists node types on app startup
+- **Frontend Benefits**: No hardcoded node types - forms generated from JSON schemas
+- **Infrastructure Cleanup**: Removed Redis and Celery from docker-compose
+
+**Node Type Schema Example:**
+```python
+class TextOutputInput(BaseModel):
+    message: str = Field(default="Hello, World!", description="Text message to output")
+
+class TextOutputOutput(BaseModel):
+    text: str = Field(description="The output message")
+
+@NodeRegistry.register
+class TextOutputNode(BaseNode[TextOutputInput, TextOutputOutput]):
+    node_type = "text_output"
+    title = "Text Output"
+    description = "Outputs a text message"
+    category = "output"
+    input_schema = TextOutputInput
+    output_schema = TextOutputOutput
+
+    def execute(self, inputs: TextOutputInput, logger: logging.Logger) -> TextOutputOutput:
+        logger.info(f"Processing: {inputs.message}")
+        return TextOutputOutput(text=inputs.message)
+```
+
+**Test Results:** 119 tests passing
+
+**Breaking Changes:**
+- Node `execute()` signature simplified: `execute(inputs, logger)` (no context)
+- Node validation moved to executor - validates before execute()
+- Logs are streamed separately, not returned in result dict
+- **Jinja2 templates**: Use `node_a` instead of `node-a` in node IDs (hyphens are subtraction in Jinja2)
+
+**Dependencies Added:**
+- `jinja2==3.1.3` - Full Jinja2 template resolution
+
+**Fixes Applied:**
+- `NameError: name 'logger' is not defined` on startup — added `logger = logging.getLogger(__name__)`
+
+**Services Remaining in docker-compose:**
+- PostgreSQL (metadata DB)
+- MinIO (S3 storage + init)
+- Spark Master/Worker
+- Backend (FastAPI)
+- Frontend (React)
+
+---
+
+### Session 7 — Typed Connection Classes, MultilineStr, Node Input Validation & Dynamic Node Discovery ✅ COMPLETED
+
+**Goal:** Redesign connection types as typed Pydantic classes with `test()` method, add custom `MultilineStr` type, validate node input schemas, implement hot-reload node discovery (Airflow-style `exec()`-based scanning), and integrate connection fields in AddNodeDialog.
+
+**Completed Files:**
+- ✅ `backend/app/schemas/connection.py` — Rewritten with `BaseConnection`, `Secret`, typed classes (`PostgresConnection`, `ClickHouseConnection`, `S3Connection`, `SparkConnection`), each with `test()` method and `x-connection-type` JSON schema marker
+- ✅ `backend/app/schemas/node_types.py` — `MultilineStr` custom type (Annotated with `format: multiline`)
+- ✅ `backend/app/schemas/node_input_validation.py` — Validates node input schemas: only allows primitives, MultilineStr, connection subclasses, nested BaseModel
+- ✅ `backend/app/connections/service.py` — Simplified to use typed connection classes' `test()` method
+- ✅ `backend/app/api/connections.py` — Updated CRUD API, added `GET /api/v1/connections/types` endpoint for frontend form generation
+- ✅ `backend/app/nodes/registry.py` — Rewritten `scan_nodes()` with Airflow-style `exec()`-based file scanning (no import sys conflicts, supports hot-reload of add/delete/change node files)
+- ✅ `backend/app/nodes/scanner.py` — Calls `scan_nodes()` before listing types for dynamic discovery
+- ✅ `backend/app/nodes/postgres_query.py` — New node: connects to PostgreSQL via `PostgresConnection` field, lists schemas/tables
+- ✅ `backend/app/nodes/add_two_numbers.py` → `multiply_two_numbers.py` — Tested hot-reload of node swap
+- ✅ `frontend/src/flows/AddNodeDialog.tsx` — Added reload button (triggers server scan), resolves connection types from `$ref` + `$defs` in JSON schema, shows multiline string labels
+- ✅ `frontend/src/flows/PipelineEditor.tsx` — Fixed long node name rendering (k-icon doesn't shrink, close button stays right)
+- ✅ `frontend/src/api/connections.ts` — Restored `connectionsApi` for ConnectionsPage compatibility, added `getConnectionTypes()`
+- ✅ `frontend/src/types/connection.ts` — Added `Connection` and `ConnectionTypeSchema` interfaces
+- ✅ `backend/tests/unit/test_connection_types.py` — 30 unit tests for Secret, Connection classes, MultilineStr, input validation
+- ✅ `backend/tests/integration/test_connections.py` — Updated for new connection architecture (19 integration tests)
+
+**Architecture Changes:**
+- **Connection Classes** — Each connection type is a single Pydantic class with `test()`, `SECRET_FIELDS`, and `x-connection-type` marker in JSON schema
+- **Secret Wrapper** — Single `Secret` class replaces per-connection Secrets models; auto-wraps strings, stores as base64
+- **Airflow-style Node Discovery** — `scan_nodes()` uses `exec()` on .py files with a prepared namespace (no import conflicts, no `__init__.py` imports needed, full hot-reload support)
+- **Input Schema Validation** — Scanner validates node input types before persisting to DB
+- **Hot-reload** — New/changed/deleted node files are detected on reload without container restart
+
+**Test Results:** 151 tests passing (30 unit + 19 integration + 102 existing)
+
+---
+
 ## Next Steps
 
 ### Frontend Tasks (remaining)
-6. **Types & API Client** — Pipeline/Node types, CRUD + run + SSE log client (partially done — types created)
-7. **Pipeline List Page** — List, create, delete pipelines (placeholder exists)
-8. **Pipeline Editor** — Node configuration forms, save/load API integration, run + SSE log viewer (canvas done)
+6. **Pipeline List Page** — List, create, delete pipelines (placeholder exists)
+7. **Pipeline Editor** — Node configuration forms in right panel (parameter editing for connection fields, primitives, multiline strings), save/load API integration, run + SSE log viewer
 
 ### Backend Tasks
 - Pipeline run execution integration

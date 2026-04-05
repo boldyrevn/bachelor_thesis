@@ -243,13 +243,13 @@ export function AddNodeDialog({ opened, onClose, onAdd }: AddNodeDialogProps) {
                       onClick={() => setSelectedNodeType(nt)}
                     >
                       <Group justify="space-between" wrap="nowrap">
-                        <Group gap="xs" wrap="nowrap">
-                          <IconCube size={16} />
+                        <Box style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0, flex: 1 }}>
+                          <IconCube size={16} style={{ flexShrink: 0 }} />
                           <Text fw={500} size="sm" lineClamp={1}>
                             {nt.title}
                           </Text>
-                        </Group>
-                        <Badge size="sm" variant="light">
+                        </Box>
+                        <Badge size="sm" variant="light" style={{ flexShrink: 0 }}>
                           {nt.node_type}
                         </Badge>
                       </Group>

@@ -322,14 +322,17 @@ function PipelineEditorWithContext() {
             {selectedNode ? (
               /* Selected node params */
               <Box>
-                <Group justify="space-between" mb="xs">
-                  <Text fw={600} size="sm">
-                    {selectedNode.data.label}
-                  </Text>
+                <Group justify="space-between" wrap="nowrap" mb="xs">
+                  <Box style={{ minWidth: 0, flex: 1 }}>
+                    <Text fw={600} size="sm" lineClamp={2}>
+                      {selectedNode.data.label}
+                    </Text>
+                  </Box>
                   <ActionIcon
                     variant="subtle"
                     size="sm"
                     onClick={() => setSelectedNodeId(null)}
+                    style={{ flexShrink: 0 }}
                   >
                     <IconX size={14} />
                   </ActionIcon>
@@ -360,10 +363,10 @@ function PipelineEditorWithContext() {
                     }}
                     onClick={() => setSelectedNodeId(node.id)}
                   >
-                    <Group gap="xs">
-                      <IconCube size={16} />
-                      <Text size="sm">{node.data.label}</Text>
-                    </Group>
+                    <Box style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0, flex: 1 }}>
+                      <IconCube size={16} style={{ flexShrink: 0 }} />
+                      <Text size="sm" lineClamp={2}>{node.data.label}</Text>
+                    </Box>
                     <ActionIcon
                       variant="subtle"
                       size="sm"
@@ -372,6 +375,7 @@ function PipelineEditorWithContext() {
                         e.stopPropagation();
                         removeNode(node.id);
                       }}
+                      style={{ flexShrink: 0 }}
                     >
                       <IconX size={14} />
                     </ActionIcon>

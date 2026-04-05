@@ -165,3 +165,25 @@ export interface ConnectionFormData {
   secrets: Record<string, any>;
   description?: string;
 }
+
+/**
+ * Connection response from GET /api/v1/connections
+ */
+export interface Connection {
+  id: string;
+  name: string;
+  connection_type: string;
+  config: Record<string, unknown>;
+  description: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/**
+ * Connection type schema from GET /api/v1/connections/types
+ */
+export interface ConnectionTypeSchema {
+  type: string;
+  title: string;
+  schema: Record<string, unknown>;
+}

@@ -100,13 +100,17 @@ class PostgresQueryNode(BaseNode[PostgresQueryInput, PostgresQueryOutput]):
                         )
                         table_names = [r["table_name"] for r in table_rows]
                         total_tables += len(table_names)
-                        logger.info(f"  Schema '{schema}': {len(table_names)} table(s) — {', '.join(table_names)}")
+                        logger.info(
+                            f"  Schema '{schema}': {len(table_names)} table(s) — {', '.join(table_names)}"
+                        )
 
                     return len(schemas), total_tables
             finally:
                 await pool.close()
 
-        schema_count, table_count = asyncio.get_event_loop().run_until_complete(_fetch())
+        schema_count, table_count = asyncio.get_event_loop().run_until_complete(
+            _fetch()
+        )
 
         logger.info(
             f"PostgresQueryNode complete: {schema_count} schema(s), {table_count} table(s)"
