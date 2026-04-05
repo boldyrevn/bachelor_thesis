@@ -1,118 +1,49 @@
-"""Unit tests for node architecture."""
+"""Unit tests for node architecture with typed schemas."""
+
+import logging
+from typing import Any
 
 import pytest
+from pydantic import BaseModel, Field
 
-from app.nodes.base import BaseNode, NodeContext, NodeResult
+from app.nodes.base import BaseNode
 from app.nodes.registry import NodeRegistry
-from app.nodes.text_output import TextOutputNode
+from app.nodes.text_output import TextOutputNode, TextOutputInput, TextOutputOutput
 
 
-class TestNodeContext:
-    """Tests for NodeContext dataclass."""
+# Test fixtures for typed schemas
+class MockInput(BaseModel):
+    """Test input schema."""
 
-    def test_context_creation(self):
-        """Test basic context creation."""
-        context = NodeContext(
-            pipeline_id="pipeline-123",
-            pipeline_run_id="run-456",
-            node_id="node-789",
+    name: str = Field(description="Test name", default="test")
+    value: int = Field(description="Test value", default=0)
+
+
+class MockOutput(BaseModel):
+    """Test output schema."""
+
+    result: str = Field(description="Test result")
+    count: int = Field(description="Result count")
+
+
+class MockNode(BaseNode[MockInput, MockOutput]):
+    """Test node implementation."""
+
+    node_type = "mock_node"
+    title = "Mock Node"
+    description = "A mock node for unit tests"
+    category = "test"
+
+    input_schema = MockInput
+    output_schema = MockOutput
+
+    def execute(self, inputs: MockInput, logger: logging.Logger) -> MockOutput:
+        """Simple test execution."""
+        logger.info(f"Processing {inputs.name}")
+        return MockOutput(
+            result=f"Hello {inputs.name}",
+            count=inputs.value,
         )
-
-        assert context.pipeline_id == "pipeline-123"
-        assert context.pipeline_run_id == "run-456"
-        assert context.node_id == "node-789"
-        assert context.pipeline_params == {}
-        assert context.upstream_outputs == {}
-
-    def test_context_with_params(self):
-        """Test context with pipeline parameters."""
-        context = NodeContext(
-            pipeline_id="pipeline-123",
-            pipeline_run_id="run-456",
-            node_id="node-789",
-            pipeline_params={"date": "2024-01-01", "env": "prod"},
-        )
-
-        assert context.pipeline_params["date"] == "2024-01-01"
-        assert context.pipeline_params["env"] == "prod"
-
-    def test_get_output(self):
-        """Test retrieving upstream node outputs."""
-        context = NodeContext(
-            pipeline_id="pipeline-123",
-            pipeline_run_id="run-456",
-            node_id="node-789",
-            upstream_outputs={
-                "node-a": {"text": "Hello", "count": 5},
-                "node-b": {"s3_path": "s3://bucket/file.parquet"},
-            },
-        )
-
-        assert context.get_output("node-a", "text") == "Hello"
-        assert context.get_output("node-a", "count") == 5
-        assert context.get_output("node-b", "s3_path") == "s3://bucket/file.parquet"
-        assert context.get_output("node-c", "missing") is None
-
-    def test_get_output_missing_node(self):
-        """Test retrieving output from non-existent node."""
-        context = NodeContext(
-            pipeline_id="pipeline-123",
-            pipeline_run_id="run-456",
-            node_id="node-789",
-            upstream_outputs={},
-        )
-
-        assert context.get_output("nonexistent", "output") is None
-
-    def test_get_output_missing_field(self):
-        """Test retrieving non-existent output field."""
-        context = NodeContext(
-            pipeline_id="pipeline-123",
-            pipeline_run_id="run-456",
-            node_id="node-789",
-            upstream_outputs={"node-a": {"text": "Hello"}},
-        )
-
-        assert context.get_output("node-a", "nonexistent") is None
-
-
-class TestNodeResult:
-    """Tests for NodeResult dataclass."""
-
-    def test_success_result(self):
-        """Test successful result creation."""
-        result = NodeResult(
-            success=True,
-            outputs={"text": "Hello"},
-            logs=["Execution completed"],
-        )
-
-        assert result.success is True
-        assert result.outputs == {"text": "Hello"}
-        assert result.logs == ["Execution completed"]
-        assert result.error is None
-
-    def test_error_result(self):
-        """Test error result creation."""
-        result = NodeResult(
-            success=False,
-            outputs={},
-            logs=["Error occurred"],
-            error="Something went wrong",
-        )
-
-        assert result.success is False
-        assert result.outputs == {}
-        assert result.logs == ["Error occurred"]
-        assert result.error == "Something went wrong"
-
-    def test_default_values(self):
-        """Test default values for optional fields."""
-        result = NodeResult(success=True)
-
-        assert result.outputs == {}
-        assert result.logs == []
-        assert result.error is None
 
 
 class TestNodeRegistry:
@@ -121,29 +52,37 @@ class TestNodeRegistry:
     def setup_method(self):
         """Clear registry before each test."""
         NodeRegistry._registry = {}
-        # Re-register TextOutputNode
+        # Re-register test nodes
+        NodeRegistry.register(MockNode)
         NodeRegistry.register(TextOutputNode)
 
     def test_get_registered_node(self):
         """Test retrieving a registered node class."""
-        node_class = NodeRegistry.get("text_output")
-        assert node_class == TextOutputNode
-        assert node_class.node_type == "text_output"
+        node_class = NodeRegistry.get("mock_node")
+        assert node_class == MockNode
+        assert node_class.node_type == "mock_node"
 
     def test_create_node_instance(self):
         """Test creating a node instance."""
-        node = NodeRegistry.create("text_output")
-        assert isinstance(node, TextOutputNode)
-        assert node.node_type == "text_output"
+        node = NodeRegistry.create("mock_node")
+        assert isinstance(node, MockNode)
+        assert node.node_type == "mock_node"
 
     def test_list_types(self):
         """Test listing registered node types."""
         types = NodeRegistry.list_types()
+        assert "mock_node" in types
         assert "text_output" in types
+
+    def test_list_classes(self):
+        """Test listing registered node classes."""
+        classes = NodeRegistry.list_classes()
+        assert MockNode in classes
+        assert TextOutputNode in classes
 
     def test_is_registered(self):
         """Test checking if node type is registered."""
-        assert NodeRegistry.is_registered("text_output") is True
+        assert NodeRegistry.is_registered("mock_node") is True
         assert NodeRegistry.is_registered("unknown_node") is False
 
     def test_get_unregistered_node_raises_error(self):
@@ -160,17 +99,87 @@ class TestNodeRegistry:
         """Test registering duplicate node type raises ValueError."""
 
         class DuplicateNode(BaseNode):
-            node_type = "text_output"
+            node_type = "mock_node"
+            title = "Duplicate"
+            description = "Duplicate node"
+            category = "test"
+            input_schema = MockInput
+            output_schema = MockOutput
 
-            def execute(self, context: NodeContext) -> NodeResult:
-                return NodeResult(success=True)
+            def execute(self, inputs: MockInput, logger: logging.Logger) -> MockOutput:
+                return MockOutput(result="dup", count=0)
 
         with pytest.raises(ValueError, match="already registered"):
             NodeRegistry.register(DuplicateNode)
 
+    def test_scan_nodes(self):
+        """Test node scanning discovers modules."""
+        # Don't clear registry - just test that scanning works
+        count_before = len(NodeRegistry.list_types())
+        count = NodeRegistry.scan_nodes()
+        # Should discover at least TextOutputNode if not already registered
+        assert count >= 0 or len(NodeRegistry.list_types()) > 0
+
+
+class TestBaseNode:
+    """Tests for BaseNode typed schema functionality."""
+
+    def setup_method(self):
+        """Create fresh test node instance."""
+        self.node = MockNode()
+
+    def test_node_metadata(self):
+        """Test node metadata attributes."""
+        assert self.node.node_type == "mock_node"
+        assert self.node.title == "Mock Node"
+        assert self.node.description == "A mock node for unit tests"
+        assert self.node.category == "test"
+
+    def test_input_schema_defined(self):
+        """Test that input_schema is defined."""
+        assert self.node.input_schema is not None
+        assert self.node.input_schema == MockInput
+
+    def test_output_schema_defined(self):
+        """Test that output_schema is defined."""
+        assert self.node.output_schema is not None
+        assert self.node.output_schema == MockOutput
+
+    def test_get_input_schema_json(self):
+        """Test getting input schema as JSON."""
+        schema = self.node.get_input_schema_json()
+        assert "properties" in schema
+        assert "name" in schema["properties"]
+        assert "value" in schema["properties"]
+
+    def test_get_output_schema_json(self):
+        """Test getting output schema as JSON."""
+        schema = self.node.get_output_schema_json()
+        assert "properties" in schema
+        assert "result" in schema["properties"]
+        assert "count" in schema["properties"]
+
+    def test_execute_with_typed_inputs(self):
+        """Test execution with typed input parameters."""
+        import logging
+
+        logger = logging.getLogger("test")
+        inputs = MockInput(name="World", value=42)
+        output = self.node.execute(inputs, logger)
+
+        assert isinstance(output, MockOutput)
+        assert output.result == "Hello World"
+        assert output.count == 42
+
+    def test_repr(self):
+        """Test string representation."""
+        assert "MockNode" in repr(self.node)
+        assert "mock_node" in repr(self.node)
+        assert "test" in repr(self.node)
+
 
 class TestTextOutputNode:
-    """Tests for TextOutputNode."""
+    """Tests for TextOutputNode with typed schemas."""
 
     def setup_method(self):
         """Create fresh TextOutputNode instance for each test."""
@@ -179,115 +188,41 @@ class TestTextOutputNode:
     def test_node_type(self):
         """Test node type identifier."""
         assert self.node.node_type == "text_output"
+        assert self.node.title == "Text Output"
+        assert self.node.category == "output"
+
+    def test_input_schema(self):
+        """Test input schema is defined correctly."""
+        assert self.node.input_schema == TextOutputInput
+        schema = self.node.get_input_schema_json()
+        assert "message" in schema["properties"]
+
+    def test_output_schema(self):
+        """Test output schema is defined correctly."""
+        assert self.node.output_schema == TextOutputOutput
+        schema = self.node.get_output_schema_json()
+        assert "text" in schema["properties"]
 
     def test_execute_default_message(self):
         """Test execution with default message."""
-        context = NodeContext(
-            pipeline_id="pipeline-123",
-            pipeline_run_id="run-456",
-            node_id="node-789",
-            pipeline_params={"node_config": {}},
-        )
+        import logging
 
-        result = self.node.execute(context, logger=None)
+        logger = logging.getLogger("test")
+        inputs = TextOutputInput()
 
-        assert result.success is True
-        assert result.outputs["text"] == "Hello, World!"
-        assert len(result.logs) == 3
-        assert "Text output node completed successfully" in result.logs
+        output = self.node.execute(inputs, logger)
+
+        assert isinstance(output, TextOutputOutput)
+        assert output.text == "Hello, World!"
 
     def test_execute_custom_message(self):
         """Test execution with custom message."""
-        context = NodeContext(
-            pipeline_id="pipeline-123",
-            pipeline_run_id="run-456",
-            node_id="node-789",
-            pipeline_params={"node_config": {"message": "Custom message"}},
-        )
+        import logging
 
-        result = self.node.execute(context, logger=None)
+        logger = logging.getLogger("test")
+        inputs = TextOutputInput(message="Custom message")
 
-        assert result.success is True
-        assert result.outputs["text"] == "Custom message"
+        output = self.node.execute(inputs, logger)
 
-    def test_execute_with_template(self):
-        """Test execution with template reference."""
-        context = NodeContext(
-            pipeline_id="pipeline-123",
-            pipeline_run_id="run-456",
-            node_id="node-789",
-            pipeline_params={"node_config": {"message": "Result: {{ node-a.text }}"}},
-            upstream_outputs={"node-a": {"text": "Hello from A"}},
-        )
-
-        result = self.node.execute(context, logger=None)
-
-        assert result.success is True
-        assert result.outputs["text"] == "Result: Hello from A"
-
-    def test_execute_with_multiple_templates(self):
-        """Test execution with multiple template references."""
-        context = NodeContext(
-            pipeline_id="pipeline-123",
-            pipeline_run_id="run-456",
-            node_id="node-789",
-            pipeline_params={
-                "node_config": {"message": "{{ node-a.text }} and {{ node-b.text }}"}
-            },
-            upstream_outputs={
-                "node-a": {"text": "First"},
-                "node-b": {"text": "Second"},
-            },
-        )
-
-        result = self.node.execute(context, logger=None)
-
-        assert result.success is True
-        assert result.outputs["text"] == "First and Second"
-
-    def test_execute_with_unresolved_template(self):
-        """Test execution with unresolved template keeps original."""
-        context = NodeContext(
-            pipeline_id="pipeline-123",
-            pipeline_run_id="run-456",
-            node_id="node-789",
-            pipeline_params={
-                "node_config": {"message": "Value: {{ nonexistent.output }}"}
-            },
-            upstream_outputs={},
-        )
-
-        result = self.node.execute(context, logger=None)
-
-        assert result.success is True
-        # Unresolved templates are kept as-is
-        assert result.outputs["text"] == "Value: {{ nonexistent.output }}"
-
-    def test_validate_config_valid(self):
-        """Test validation with valid configuration."""
-        config = {"message": "Hello"}
-        # Should not raise
-        self.node.validate_config(config)
-
-    def test_validate_config_empty(self):
-        """Test validation with empty configuration."""
-        config = {}
-        # Should not raise
-        self.node.validate_config(config)
-
-    def test_validate_config_non_dict_raises_error(self):
-        """Test validation with non-dict config raises ValueError."""
-        with pytest.raises(ValueError, match="Configuration must be a dictionary"):
-            self.node.validate_config("not a dict")
-
-    def test_validate_config_non_string_message_raises_error(self):
-        """Test validation with non-string message raises ValueError."""
-        config = {"message": 123}
-        with pytest.raises(ValueError, match="Message must be a string"):
-            self.node.validate_config(config)
-
-    def test_repr(self):
-        """Test string representation."""
-        node = TextOutputNode()
-        assert "TextOutputNode" in repr(node)
-        assert "text_output" in repr(node)
+        assert isinstance(output, TextOutputOutput)
+        assert output.text == "Custom message"

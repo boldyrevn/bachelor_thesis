@@ -19,20 +19,6 @@ services:
     networks:
       - flowforge-network
 
-  # Redis - Celery Broker
-  redis:
-    image: redis:7-alpine
-    container_name: flowforge-redis
-    ports:
-      - "6379:6379"
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
-    networks:
-      - flowforge-network
-
   # MinIO - S3 Compatible Storage
   minio:
     image: minio/minio:RELEASE.2025-09-07T16-13-09Z
@@ -116,7 +102,6 @@ services:
     container_name: flowforge-backend
     environment:
       - DATABASE_URL=postgresql+asyncpg://flowforge:flowforge_secret@postgres:5432/flowforge
-      - REDIS_URL=redis://redis:6379/0
       - MINIO_ENDPOINT=minio:9000
       - MINIO_ACCESS_KEY=flowforge_admin
       - MINIO_SECRET_KEY=flowforge_secret
@@ -125,38 +110,6 @@ services:
       - "8000:8000"
     depends_on:
       postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-      minio:
-        condition: service_healthy
-      spark-master:
-        condition: service_started
-    volumes:
-      - ./backend:/app
-    networks:
-      - flowforge-network
-
-  # Celery Worker
-  celery-worker:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
-    container_name: flowforge-celery-worker
-    command: celery -A app.workers.celery_app worker --loglevel=info
-    environment:
-      - DATABASE_URL=postgresql+asyncpg://flowforge:flowforge_secret@postgres:5432/flowforge
-      - REDIS_URL=redis://redis:6379/0
-      - CELERY_BROKER_URL=redis://redis:6379/0
-      - CELERY_RESULT_BACKEND=redis://redis:6379/0
-      - MINIO_ENDPOINT=minio:9000
-      - MINIO_ACCESS_KEY=flowforge_admin
-      - MINIO_SECRET_KEY=flowforge_secret
-      - SPARK_MASTER=spark://spark-master:7077
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
         condition: service_healthy
       minio:
         condition: service_healthy

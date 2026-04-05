@@ -93,6 +93,32 @@
         }
       }
     },
+    "/api/v1/connections/types": {
+      "get": {
+        "tags": [
+          "connections"
+        ],
+        "summary": "List available connection types with schemas",
+        "description": "Return metadata for all connection types for frontend form generation.",
+        "operationId": "list_connection_types_api_v1_connections_types_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ConnectionTypeInfo"
+                  },
+                  "type": "array",
+                  "title": "Response List Connection Types Api V1 Connections Types Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/connections": {
       "get": {
         "tags": [
@@ -123,7 +149,7 @@
           "connections"
         ],
         "summary": "Create a new connection",
-        "description": "Create a new connection.\n\n- **name**: Unique connection name\n- **connection_type**: Type of connection (postgres, clickhouse, s3, spark)\n- **config**: Connection configuration (type-specific)\n- **secrets**: Connection secrets (passwords, keys)\n- **description**: Optional description",
+        "description": "Create a new connection.",
         "operationId": "create_connection_api_v1_connections_post",
         "requestBody": {
           "content": {
@@ -208,7 +234,7 @@
           "connections"
         ],
         "summary": "Update connection",
-        "description": "Update an existing connection.\n\nOnly provided fields will be updated.",
+        "description": "Update an existing connection.",
         "operationId": "update_connection_api_v1_connections__connection_id__put",
         "parameters": [
           {
@@ -296,8 +322,8 @@
           "connections"
         ],
         "summary": "Test connection",
-        "description": "Test a connection to verify it works.\n\nThis endpoint attempts to establish a connection using the stored credentials.\nReturns success status and a message describing the result.",
-        "operationId": "test_connection_api_v1_connections__connection_id__test_post",
+        "description": "Test a connection to verify it works.",
+        "operationId": "test_connection_endpoint_api_v1_connections__connection_id__test_post",
         "parameters": [
           {
             "name": "connection_id",
@@ -316,7 +342,7 @@
               "application/json": {
                 "schema": {
                   "type": "object",
-                  "title": "Response Test Connection Api V1 Connections  Connection Id  Test Post"
+                  "title": "Response Test Connection Endpoint Api V1 Connections  Connection Id  Test Post"
                 }
               }
             }
@@ -327,6 +353,94 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/node-types": {
+      "get": {
+        "tags": [
+          "node-types"
+        ],
+        "summary": "List all node types",
+        "description": "Retrieve all available node types with their schemas and metadata.",
+        "operationId": "list_node_types_api_v1_node_types_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NodeTypeListResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/node-types/{node_type}": {
+      "get": {
+        "tags": [
+          "node-types"
+        ],
+        "summary": "Get node type by ID",
+        "description": "Retrieve metadata for a specific node type.",
+        "operationId": "get_node_type_api_v1_node_types__node_type__get",
+        "parameters": [
+          {
+            "name": "node_type",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Node Type"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NodeTypeResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/node-types/scan": {
+      "post": {
+        "tags": [
+          "node-types"
+        ],
+        "summary": "Scan and sync node types",
+        "description": "Rescan node modules and synchronize metadata with the database.",
+        "operationId": "scan_node_types_api_v1_node_types_scan_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "title": "Response Scan Node Types Api V1 Node Types Scan Post"
                 }
               }
             }
@@ -742,6 +856,30 @@
         "title": "ConnectionType",
         "description": "Supported connection types."
       },
+      "ConnectionTypeInfo": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "title": "Type"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "schema": {
+            "type": "object",
+            "title": "Schema"
+          }
+        },
+        "type": "object",
+        "required": [
+          "type",
+          "title",
+          "schema"
+        ],
+        "title": "ConnectionTypeInfo",
+        "description": "Connection type metadata for frontend form generation."
+      },
       "ConnectionUpdateRequest": {
         "properties": {
           "name": {
@@ -805,6 +943,86 @@
         },
         "type": "object",
         "title": "HTTPValidationError"
+      },
+      "NodeTypeListResponse": {
+        "properties": {
+          "node_types": {
+            "items": {
+              "$ref": "#/components/schemas/NodeTypeResponse"
+            },
+            "type": "array",
+            "title": "Node Types"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total",
+            "description": "Total number of node types"
+          }
+        },
+        "type": "object",
+        "required": [
+          "node_types",
+          "total"
+        ],
+        "title": "NodeTypeListResponse",
+        "description": "Schema for listing node types."
+      },
+      "NodeTypeResponse": {
+        "properties": {
+          "node_type": {
+            "type": "string",
+            "title": "Node Type",
+            "description": "Unique node type identifier"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title",
+            "description": "Human-readable node name"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description",
+            "description": "Detailed description"
+          },
+          "category": {
+            "type": "string",
+            "title": "Category",
+            "description": "Category for UI grouping"
+          },
+          "input_schema": {
+            "type": "object",
+            "title": "Input Schema",
+            "description": "JSON Schema for input parameters"
+          },
+          "output_schema": {
+            "type": "object",
+            "title": "Output Schema",
+            "description": "JSON Schema for output artifacts"
+          },
+          "version": {
+            "type": "integer",
+            "title": "Version",
+            "description": "Schema version"
+          },
+          "is_active": {
+            "type": "boolean",
+            "title": "Is Active",
+            "description": "Whether node type is available"
+          }
+        },
+        "type": "object",
+        "required": [
+          "node_type",
+          "title",
+          "description",
+          "category",
+          "input_schema",
+          "output_schema",
+          "version",
+          "is_active"
+        ],
+        "title": "NodeTypeResponse",
+        "description": "Schema for node type API response."
       },
       "PipelineCreate": {
         "properties": {

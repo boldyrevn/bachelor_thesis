@@ -1,91 +1,102 @@
-"""Node base class and registry for FlowForge pipeline execution."""
+"""Node base class with typed input/output schemas for FlowForge pipeline execution."""
 
 import logging
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
-from typing import Any
+from typing import Generic, TypeVar
+
+from pydantic import BaseModel
 
 
-@dataclass
-class NodeContext:
-    """Context passed to nodes during execution.
+# Type variables for generic node execution
+InputT = TypeVar("InputT", bound=BaseModel)
+OutputT = TypeVar("OutputT", bound=BaseModel)
 
-    Contains resolved inputs from upstream nodes and pipeline parameters.
+
+class BaseNode(ABC, Generic[InputT, OutputT]):
+    """Abstract base class for all FlowForge nodes with typed schemas.
+
+    Node responsibilities:
+    1. Declare typed input_schema and output_schema as Pydantic models
+    2. Implement execute(input: InputSchema, logger) -> OutputSchema
+    3. Register with NodeRegistry via @NodeRegistry.register decorator
+
+    Nodes are STATELESS - they only:
+    - Execute code with validated inputs
+    - Log progress via provided logger
+    - Return typed outputs
+
+    Scheduler responsibilities (NOT node's job):
+    - Input validation
+    - Context assembly
+    - Template resolution
+    - Upstream output collection
+
+    Example:
+        class TextInput(BaseModel):
+            message: str = Field(description="Text to output")
+
+        class TextOutput(BaseModel):
+            text: str = Field(description="Output text")
+
+        @NodeRegistry.register
+        class TextOutputNode(BaseNode[TextInput, TextOutput]):
+            node_type = "text_output"
+            title = "Text Output"
+            description = "Outputs a text message"
+            category = "output"
+            input_schema = TextInput
+            output_schema = TextOutput
+
+            def execute(self, inputs: TextInput, logger: logging.Logger) -> TextOutput:
+                logger.info(f"Processing message: {inputs.message}")
+                return TextOutput(text=inputs.message)
     """
 
-    pipeline_id: str
-    pipeline_run_id: str
-    node_id: str
-    pipeline_params: dict[str, Any] = field(default_factory=dict)
-    upstream_outputs: dict[str, dict[str, Any]] = field(default_factory=dict)
-
-    def get_output(self, node_id: str, output_name: str) -> Any:
-        """Get output from an upstream node.
-
-        Args:
-            node_id: ID of the upstream node
-            output_name: Name of the output to retrieve
-
-        Returns:
-            The output value, or None if not found
-        """
-        return self.upstream_outputs.get(node_id, {}).get(output_name)
-
-
-@dataclass
-class NodeResult:
-    """Result of node execution.
-
-    Contains output artifacts and execution logs.
-    """
-
-    success: bool
-    outputs: dict[str, Any] = field(default_factory=dict)
-    logs: list[str] = field(default_factory=list)
-    error: str | None = None
-
-
-class BaseNode(ABC):
-    """Abstract base class for all FlowForge nodes.
-
-    Each node type must:
-    1. Declare a unique node_type class attribute
-    2. Implement the execute() method
-    3. Register itself with the NodeRegistry
-
-    Nodes are stateless - they read from storage, process, and write back.
-    Each node runs as an isolated Celery task.
-    """
-
+    # Node metadata (must be overridden in subclasses)
     node_type: str = "base"
+    title: str = "Base Node"
+    description: str = "Base node class"
+    category: str = "general"  # Grouping for UI: data, ml, transform, output, etc.
+
+    # Typed schemas (must be overridden in subclasses)
+    input_schema: type[InputT] | None = None
+    output_schema: type[OutputT] | None = None
 
     @abstractmethod
-    def execute(
-        self, context: NodeContext, logger: logging.Logger | None = None
-    ) -> NodeResult:
-        """Execute the node logic.
+    def execute(self, inputs: InputT, logger: logging.Logger) -> OutputT:
+        """Execute the node logic with validated inputs.
 
         Args:
-            context: Execution context with inputs and parameters
-            logger: Optional logger for streaming logs. If None, uses standard logging.
+            inputs: Validated input parameters (Pydantic model instance)
+            logger: Logger for streaming execution logs
 
         Returns:
-            NodeResult with outputs and logs
-        """
-        pass
-
-    def validate_config(self, config: dict[str, Any]) -> None:
-        """Validate node configuration before execution.
-
-        Override in subclasses to add type-specific validation.
-
-        Args:
-            config: Node configuration from the graph definition
+            Typed output object (Pydantic model instance)
 
         Raises:
-            ValueError: If configuration is invalid
+            Exception: For any execution failures
         """
         pass
 
+    def get_input_schema_json(self) -> dict:
+        """Get JSON Schema for input parameters.
+
+        Returns:
+            JSON Schema dict for frontend form generation
+        """
+        if self.input_schema is None:
+            return {}
+        return self.input_schema.model_json_schema()
+
+    def get_output_schema_json(self) -> dict:
+        """Get JSON Schema for output artifacts.
+
+        Returns:
+            JSON Schema dict for frontend output handle generation
+        """
+        if self.output_schema is None:
+            return {}
+        return self.output_schema.model_json_schema()
+
     def __repr__(self) -> str:
-        return f"<{self.__class__.__name__}(type={self.node_type})>"
+        return f"<{self.__class__.__name__}(type={self.node_type}, category={self.category})>"

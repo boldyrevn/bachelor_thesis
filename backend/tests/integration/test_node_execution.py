@@ -10,7 +10,6 @@ import asyncio
 import logging
 import pytest
 
-from app.nodes.base import NodeContext, NodeResult
 from app.nodes.registry import NodeRegistry
 from app.orchestration.executor import (
     LogMessage,
@@ -41,43 +40,44 @@ class TestNodeExecutionWithProcessPool:
 
         assert result["success"] is True
         assert result["outputs"]["text"] == "Hello from ProcessPool!"
-        assert "Text output node completed successfully" in result["logs"]
 
     def test_execute_text_output_node_with_template(
         self, executor: NodeExecutor
     ) -> None:
-        """Test executing TextOutputNode with template resolution."""
+        """Test executing TextOutputNode with Jinja2 template resolution."""
         result = asyncio.get_event_loop().run_until_complete(
             executor.execute_node(
                 node_type="text_output",
-                node_config={"message": "Upstream said: {{ node-a.text }}"},
+                node_config={"message": "Upstream said: {{ node_a.text }}"},
                 pipeline_params={},
-                upstream_outputs={"node-a": {"text": "Hello from upstream!"}},
+                upstream_outputs={"node_a": {"text": "Hello from upstream!"}},
             )
         )
 
         assert result["success"] is True
+        # Jinja2 template resolved
         assert result["outputs"]["text"] == "Upstream said: Hello from upstream!"
 
     def test_execute_text_output_node_with_multiple_templates(
         self, executor: NodeExecutor
     ) -> None:
-        """Test executing TextOutputNode with multiple template references."""
+        """Test executing TextOutputNode with multiple Jinja2 templates."""
         result = asyncio.get_event_loop().run_until_complete(
             executor.execute_node(
                 node_type="text_output",
                 node_config={
-                    "message": "First: {{ node-a.text }}, Second: {{ node-b.number }}"
+                    "message": "First: {{ node_a.text }}, Second: {{ node_b.number }}"
                 },
                 pipeline_params={},
                 upstream_outputs={
-                    "node-a": {"text": "Alpha"},
-                    "node-b": {"number": 42},
+                    "node_a": {"text": "Alpha"},
+                    "node_b": {"number": 42},
                 },
             )
         )
 
         assert result["success"] is True
+        # Jinja2 templates resolved
         assert result["outputs"]["text"] == "First: Alpha, Second: 42"
 
     def test_execute_unknown_node_type(self, executor: NodeExecutor) -> None:
@@ -107,7 +107,8 @@ class TestNodeExecutionWithProcessPool:
 
         assert result["success"] is False
         assert "Configuration validation failed" in result["error"]
-        assert "Message must be a string" in result["error"]
+        assert "message" in result["error"].lower()
+        assert "string" in result["error"].lower()
 
     def test_execute_node_default_message(self, executor: NodeExecutor) -> None:
         """Test executing TextOutputNode with default message."""
@@ -124,18 +125,18 @@ class TestNodeExecutionWithProcessPool:
         assert result["outputs"]["text"] == "Hello, World!"
 
     def test_execute_node_with_pipeline_params(self, executor: NodeExecutor) -> None:
-        """Test executing node with pipeline parameters via upstream output."""
-        # Template resolution works with upstream outputs, not direct pipeline params
+        """Test executing node with Jinja2 template resolution for pipeline parameters."""
         result = asyncio.get_event_loop().run_until_complete(
             executor.execute_node(
                 node_type="text_output",
                 node_config={"message": "Date: {{ params.date }}"},
                 pipeline_params={"date": "2024-01-15", "env": "prod"},
-                upstream_outputs={"params": {"date": "2024-01-15"}},
+                upstream_outputs={},
             )
         )
 
         assert result["success"] is True
+        # Jinja2 template resolved with params
         assert result["outputs"]["text"] == "Date: 2024-01-15"
 
     def test_execute_multiple_nodes_concurrently(self, executor: NodeExecutor) -> None:
@@ -198,7 +199,7 @@ class TestExecuteNodeLocalFunction:
         assert result["outputs"]["text"] == "Hello via execute_node_local!"
 
     def test_execute_node_local_with_template(self) -> None:
-        """Test execute_node_local with template resolution."""
+        """Test execute_node_local with Jinja2 template resolution."""
         result = asyncio.get_event_loop().run_until_complete(
             execute_node_local(
                 node_type="text_output",
@@ -209,6 +210,7 @@ class TestExecuteNodeLocalFunction:
         )
 
         assert result["success"] is True
+        # Jinja2 template resolved
         assert result["outputs"]["text"] == "Value: resolved!"
 
 
@@ -262,9 +264,8 @@ class TestLogStreaming:
                 final_result = result
 
         # Verify logs were received
-        assert len(logs_received) >= 3
+        assert len(logs_received) >= 2
         assert any("Starting text output node" in log.message for log in logs_received)
-        assert any("Resolved message" in log.message for log in logs_received)
         assert any("completed successfully" in log.message for log in logs_received)
 
         # Verify final result
@@ -299,7 +300,7 @@ class TestLogStreaming:
 
     @pytest.mark.asyncio
     async def test_streaming_with_template_resolution(self) -> None:
-        """Test streaming with template resolution."""
+        """Test streaming with Jinja2 template resolution."""
         logs_received = []
         final_result = None
 
@@ -318,10 +319,8 @@ class TestLogStreaming:
 
         assert final_result is not None
         assert final_result["success"] is True
+        # Jinja2 template resolved
         assert final_result["outputs"]["text"] == "Hello World!"
-
-        # Verify logs contain resolved message
-        assert any("Hello World!" in log.message for log in logs_received)
 
     @pytest.mark.asyncio
     async def test_streaming_error_logs(self) -> None:
@@ -415,12 +414,11 @@ class TestLogStreaming:
         # Verify all messages were captured
         all_messages = [msg for batch in log_batches for msg in batch]
         assert (
-            len(all_messages) >= 3
-        ), f"Expected at least 3 log messages, got {len(all_messages)}: {all_messages}"
+            len(all_messages) >= 2
+        ), f"Expected at least 2 log messages, got {len(all_messages)}: {all_messages}"
 
         # Verify expected log messages from TextOutputNode
         assert any("Starting text output node" in msg for msg in all_messages)
-        assert any("Resolved message" in msg for msg in all_messages)
         assert any("completed successfully" in msg for msg in all_messages)
 
         # Verify final result

@@ -1,6 +1,7 @@
 """FastAPI application entry point."""
 
 import json
+import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import AsyncGenerator
@@ -11,9 +12,12 @@ from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker, create_async
 
 from app.api.connections import connections_router
 from app.api.demo import demo_router
+from app.api.node_types import node_types_router
 from app.api.pipelines import pipelines_router
 from app.core.config import settings, setup_logging
 from app.models.base import Base
+
+logger = logging.getLogger(__name__)
 
 
 # Global database session factory and engine
@@ -40,6 +44,30 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # Create all tables (for development - use Alembic migrations in production)
     async with db_engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+
+    # Scan and persist node types on startup
+    from app.nodes.registry import NodeRegistry
+    from app.nodes.scanner import NodeScanner
+
+    # Scan and import all node modules
+    NodeRegistry.scan_nodes()
+
+    # Persist node metadata to DB
+    async_session = async_sessionmaker(bind=db_engine, expire_on_commit=False)
+    async with async_session() as session:
+        scanner = NodeScanner(session)
+        try:
+            stats = await scanner.scan_and_persist()
+            if stats["errors"]:
+                logger.warning(
+                    f"Node scan completed with {len(stats['errors'])} errors: {stats['errors']}"
+                )
+            else:
+                logger.info(
+                    f"Node scan completed: {stats['total']} node types registered"
+                )
+        except Exception as e:
+            logger.error(f"Failed to scan node types on startup: {e}", exc_info=True)
 
     # Export OpenAPI spec to file
     openapi_spec = app.openapi()
@@ -80,6 +108,7 @@ def create_app() -> FastAPI:
     # Include routers
     app.include_router(demo_router)
     app.include_router(connections_router)
+    app.include_router(node_types_router)
     app.include_router(pipelines_router)
 
     return app

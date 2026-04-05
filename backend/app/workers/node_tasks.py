@@ -1,10 +1,16 @@
-"""Celery tasks for node execution."""
+"""Celery tasks for node execution.
 
+Note: This module will be refactored when Scheduler is implemented.
+Currently handles validation and execution with typed schemas.
+"""
+
+import logging
 from typing import Any
 
-from app.nodes.base import NodeContext, NodeResult
 from app.nodes.registry import NodeRegistry
 from app.workers.celery_app import celery_app
+
+logger = logging.getLogger(__name__)
 
 
 @celery_app.task(bind=True)
@@ -23,6 +29,8 @@ def execute_node_task(
     This is the main entry point for node execution. Each node runs as an
     isolated Celery task with its own context and resources.
 
+    Note: Validation and context assembly will move to Scheduler later.
+
     Args:
         pipeline_id: UUID of the pipeline
         pipeline_run_id: UUID of the pipeline run
@@ -30,8 +38,7 @@ def execute_node_task(
         node_type: Type of node to execute (e.g., "text_output")
         node_config: Node-specific configuration from the graph definition
         pipeline_params: Pipeline-level input parameters
-        upstream_outputs: Outputs from upstream nodes in format:
-            {"node_id": {"output_name": value, ...}, ...}
+        upstream_outputs: Outputs from upstream nodes (for future Scheduler use)
 
     Returns:
         Dictionary with execution result containing:
@@ -44,27 +51,34 @@ def execute_node_task(
         # Create node instance
         node = NodeRegistry.create(node_type)
 
-        # Validate node configuration
-        node.validate_config(node_config)
+        # Validate configuration against input_schema
+        # TODO: Move to Scheduler when implemented
+        if node.input_schema is None:
+            raise RuntimeError(f"Node '{node_type}' does not define input_schema")
 
-        # Build execution context
-        context = NodeContext(
-            pipeline_id=pipeline_id,
-            pipeline_run_id=pipeline_run_id,
-            node_id=node_id,
-            pipeline_params={**pipeline_params, "node_config": node_config},
-            upstream_outputs=upstream_outputs,
-        )
+        inputs = node.input_schema(**node_config)
 
         # Execute node with logger
-        result = node.execute(context, logger=logging.getLogger(f"node.{node_id}"))
+        # TODO: Update when Scheduler provides context
+        output = node.execute(inputs, logger=logging.getLogger(f"node.{node_id}"))
+
+        # Validate output against output_schema
+        # TODO: Move to Scheduler when implemented
+        if node.output_schema is None:
+            raise RuntimeError(f"Node '{node_type}' does not define output_schema")
+
+        if not isinstance(output, node.output_schema):
+            raise ValueError(
+                f"Node '{node_type}' returned {type(output).__name__}, "
+                f"expected {node.output_schema.__name__}"
+            )
 
         # Return serialized result
         return {
-            "success": result.success,
-            "outputs": result.outputs,
-            "logs": result.logs,
-            "error": result.error,
+            "success": True,
+            "outputs": output.model_dump(),
+            "logs": [],
+            "error": None,
         }
 
     except KeyError as e:
@@ -109,7 +123,7 @@ def execute_node_sync(
     This function is used for testing and local execution.
     It runs the node in the current process (not isolated).
 
-    For isolated execution, use app.orchestration.executor.execute_node_local.
+    Note: Will be replaced by Scheduler when implemented.
 
     Args:
         node_type: Type of node to execute
@@ -120,31 +134,35 @@ def execute_node_sync(
     Returns:
         Execution result dictionary
     """
-    # Add node_config to pipeline_params for compatibility
-    full_params = {**pipeline_params, "node_config": node_config}
-
-    # Create context
-    context = NodeContext(
-        pipeline_id=full_params.get("_pipeline_id", ""),
-        pipeline_run_id=full_params.get("_pipeline_run_id", ""),
-        node_id=full_params.get("_node_id", ""),
-        pipeline_params=full_params,
-        upstream_outputs=upstream_outputs,
-    )
-
     try:
-        # Create and validate node
+        # Create node instance
         node = NodeRegistry.create(node_type)
-        node.validate_config(node_config)
 
-        # Execute with logger
-        result = node.execute(context, logger=logging.getLogger(f"node.{node_id}"))
+        # Validate configuration against input_schema
+        if node.input_schema is None:
+            raise RuntimeError(f"Node '{node_type}' does not define input_schema")
+
+        inputs = node.input_schema(**node_config)
+
+        # Execute node with logger
+        node_id = pipeline_params.get("_node_id", "sync")
+        output = node.execute(inputs, logger=logging.getLogger(f"node.{node_id}"))
+
+        # Validate output against output_schema
+        if node.output_schema is None:
+            raise RuntimeError(f"Node '{node_type}' does not define output_schema")
+
+        if not isinstance(output, node.output_schema):
+            raise ValueError(
+                f"Node '{node_type}' returned {type(output).__name__}, "
+                f"expected {node.output_schema.__name__}"
+            )
 
         return {
-            "success": result.success,
-            "outputs": result.outputs,
-            "logs": result.logs,
-            "error": result.error,
+            "success": True,
+            "outputs": output.model_dump(),
+            "logs": [],
+            "error": None,
         }
 
     except KeyError as e:

@@ -14,8 +14,6 @@ from dataclasses import dataclass
 from multiprocessing import Queue
 from typing import Any, AsyncGenerator, Optional
 
-from app.nodes.base import NodeContext, NodeResult
-from app.nodes.registry import NodeRegistry
 from app.orchestration.logger import create_streaming_logger
 
 logger = logging.getLogger(__name__)
@@ -43,13 +41,16 @@ def _execute_node_in_process(
     """Execute a node in a separate process with optional log streaming.
 
     This function is called inside the process pool. It imports the node
-    registry and executes the node in complete isolation.
+    registry and executes the node with typed input/output schemas.
+
+    Note: Validation and context assembly will be handled by Scheduler later.
+    Currently, this function validates inputs against input_schema for safety.
 
     Args:
         node_type: Type of node to execute
-        node_config: Node configuration
+        node_config: Node configuration (will be validated against input_schema)
         pipeline_params: Pipeline parameters
-        upstream_outputs: Outputs from upstream nodes
+        upstream_outputs: Outputs from upstream nodes (for future Scheduler use)
         log_queue: Optional queue for streaming logs
         pipeline_run_id: Pipeline run ID for log context
         node_id: Node ID for log context
@@ -57,7 +58,6 @@ def _execute_node_in_process(
     Returns:
         Dictionary with execution result
     """
-    from app.nodes.base import NodeContext
     from app.nodes.registry import NodeRegistry
 
     # Create logger with queue handler if provided
@@ -75,27 +75,52 @@ def _execute_node_in_process(
             )
 
         py_logger = create_streaming_logger(f"node.{node_id}", on_log)
+    else:
+        # Create standard logger for non-streaming execution
+        py_logger = logging.getLogger(f"node.{node_id}")
 
     try:
+        # Create node instance
         node = NodeRegistry.create(node_type)
-        node.validate_config(node_config)
 
-        full_params = {**pipeline_params, "node_config": node_config}
-        context = NodeContext(
-            pipeline_id=full_params.get("_pipeline_id", ""),
-            pipeline_run_id=full_params.get("_pipeline_run_id", pipeline_run_id),
-            node_id=full_params.get("_node_id", node_id),
-            pipeline_params=full_params,
+        # Resolve Jinja2 templates in node_config
+        # TODO: Move to Scheduler when implemented
+        from app.core.template_resolver import resolve_dict_values
+
+        resolved_config = resolve_dict_values(
+            node_config,
+            params=pipeline_params,
             upstream_outputs=upstream_outputs,
         )
 
-        result = node.execute(context, logger=py_logger)
+        # Validate configuration against input_schema
+        # TODO: Move to Scheduler when implemented
+        if node.input_schema is None:
+            raise RuntimeError(f"Node '{node_type}' does not define input_schema")
+
+        inputs = node.input_schema(**resolved_config)
+
+        # Execute node with typed inputs
+        output = node.execute(inputs, logger=py_logger)
+
+        # Validate output against output_schema
+        # TODO: Move to Scheduler when implemented
+        if node.output_schema is None:
+            raise RuntimeError(f"Node '{node_type}' does not define output_schema")
+
+        if not isinstance(output, node.output_schema):
+            raise ValueError(
+                f"Node '{node_type}' returned {type(output).__name__}, "
+                f"expected {node.output_schema.__name__}"
+            )
+
+        output_dict = output.model_dump()
 
         return {
-            "success": result.success,
-            "outputs": result.outputs,
-            "logs": result.logs,
-            "error": result.error,
+            "success": True,
+            "outputs": output_dict,
+            "logs": [],  # Logs are streamed separately
+            "error": None,
         }
 
     except KeyError as e:
