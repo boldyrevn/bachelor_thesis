@@ -2,7 +2,7 @@
  * Pipeline Editor canvas with @xyflow/react
  * Visual node-based DAG editor with drag-and-drop
  *
- * Layout: [Pipeline Params] | [Canvas + Add Node button] | [Node List / Node Params]
+ * Layout: [Pipeline Params] | [Canvas] | [Node List + Add Node button | Node Params]
  * All panels form a continuous space with resizable borders.
  */
 
@@ -28,7 +28,6 @@ import {
   Box,
   Text,
   Button,
-  Menu,
   Group,
   ActionIcon,
   Badge,
@@ -42,6 +41,8 @@ import {
   ConnectionDragProvider,
   useConnectionDrag,
 } from './ConnectionDragContext';
+import { AddNodeDialog } from './AddNodeDialog';
+import type { CanvasNodeData } from '../types/nodeType';
 
 /**
  * Register custom node and edge types
@@ -54,14 +55,6 @@ const edgeTypes: EdgeTypes = {
   flowEdge: FlowEdge,
 };
 
-/**
- * Available node types with camelCase display names
- */
-const AVAILABLE_NODES = [
-  { type: 'textOutput', label: 'Text Output', icon: '📝' },
-  { type: 'pipelineParams', label: 'Pipeline Params', icon: '⚙️' },
-];
-
 const MIN_PANEL_WIDTH = 200;
 const MAX_PANEL_WIDTH = 600;
 const DEFAULT_LEFT_WIDTH = 260;
@@ -72,34 +65,32 @@ const DEFAULT_RIGHT_WIDTH = 280;
  */
 function PipelineEditorWithContext() {
   const { draggingFromNodeId, setDraggingFromNodeId } = useConnectionDrag();
-  const [nodes, setNodes, onNodesChange] = useNodesState<Node[]>([]);
+  const [nodes, setNodes, onNodesChange] = useNodesState<Node<CanvasNodeData>[]>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge[]>([]);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [leftWidth, setLeftWidth] = useState(DEFAULT_LEFT_WIDTH);
   const [rightWidth, setRightWidth] = useState(DEFAULT_RIGHT_WIDTH);
+  const [dialogOpened, setDialogOpened] = useState(false);
   const { screenToFlowPosition } = useReactFlow();
 
   /**
-   * Add a node at the center of the viewport
+   * Add a node from the dialog with custom name
    */
-  const addNode = useCallback(
-    (nodeType: string) => {
-      const nodeDef = AVAILABLE_NODES.find((n) => n.type === nodeType);
-      if (!nodeDef) return;
-
+  const handleAddNode = useCallback(
+    (nodeType: string, customName: string, config: Record<string, unknown>) => {
       const position = screenToFlowPosition({
         x: window.innerWidth / 2,
         y: window.innerHeight / 2,
       });
 
-      const newNode: Node = {
+      const newNode: Node<CanvasNodeData> = {
         id: `node-${Date.now()}`,
         type: 'flowNode',
         position,
         data: {
-          label: nodeDef.label,
-          nodeType: nodeDef.type,
-          config: {},
+          label: customName,
+          nodeType,
+          config,
         },
       };
 
@@ -249,41 +240,6 @@ function PipelineEditorWithContext() {
 
       {/* Center: Canvas */}
       <Box style={{ flex: 1, position: 'relative', minWidth: 300 }}>
-        {/* Add Node button */}
-        <Box
-          style={{
-            position: 'absolute',
-            top: 12,
-            left: 12,
-            zIndex: 10,
-            display: 'flex',
-            gap: 8,
-          }}
-        >
-          <Menu trigger="hover" openDelay={100} closeDelay={200}>
-            <Menu.Target>
-              <Button
-                leftSection={<IconPlus size={16} />}
-                size="sm"
-                variant="filled"
-              >
-                Добавить Node
-              </Button>
-            </Menu.Target>
-            <Menu.Dropdown>
-              {AVAILABLE_NODES.map((nodeDef) => (
-                <Menu.Item
-                  key={nodeDef.type}
-                  leftSection={<span>{nodeDef.icon}</span>}
-                  onClick={() => addNode(nodeDef.type)}
-                >
-                  {nodeDef.label}
-                </Menu.Item>
-              ))}
-            </Menu.Dropdown>
-          </Menu>
-        </Box>
-
         <ReactFlow
           nodes={nodes}
           edges={edges}
@@ -368,7 +324,7 @@ function PipelineEditorWithContext() {
               <Box>
                 <Group justify="space-between" mb="xs">
                   <Text fw={600} size="sm">
-                    {selectedNode.data.label as string}
+                    {selectedNode.data.label}
                   </Text>
                   <ActionIcon
                     variant="subtle"
@@ -379,7 +335,7 @@ function PipelineEditorWithContext() {
                   </ActionIcon>
                 </Group>
                 <Badge size="sm" variant="light">
-                  {selectedNode.data.nodeType as string}
+                  {selectedNode.data.nodeType}
                 </Badge>
                 <Box mt="md">
                   <Text c="dimmed" size="xs">
@@ -406,7 +362,7 @@ function PipelineEditorWithContext() {
                   >
                     <Group gap="xs">
                       <IconCube size={16} />
-                      <Text size="sm">{node.data.label as string}</Text>
+                      <Text size="sm">{node.data.label}</Text>
                     </Group>
                     <ActionIcon
                       variant="subtle"
@@ -424,12 +380,38 @@ function PipelineEditorWithContext() {
               </Box>
             ) : (
               <Text c="dimmed" size="sm">
-                Нет узлов. Добавьте узел через кнопку «Добавить Node».
+                Нет узлов. Добавьте узел через кнопку ниже.
               </Text>
             )}
           </Box>
         </ScrollArea>
+
+        {/* Add Node button at the bottom of the right panel */}
+        <Box
+          p="sm"
+          style={{
+            borderTop: '1px solid #dee2e6',
+            backgroundColor: '#f8f9fa',
+          }}
+        >
+          <Button
+            leftSection={<IconPlus size={16} />}
+            size="sm"
+            variant="filled"
+            fullWidth
+            onClick={() => setDialogOpened(true)}
+          >
+            Добавить Node
+          </Button>
+        </Box>
       </Box>
+
+      {/* Add Node Dialog */}
+      <AddNodeDialog
+        opened={dialogOpened}
+        onClose={() => setDialogOpened(false)}
+        onAdd={handleAddNode}
+      />
     </Box>
   );
 }
