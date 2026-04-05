@@ -1,66 +1,72 @@
 import { api } from './client';
-import type {
-  ConnectionResponse,
-  ConnectionCreateRequest,
-  ConnectionUpdateRequest,
-  ConnectionTestResult,
-} from '../types/connection';
 
-/**
- * Connections API client.
- */
+export interface Connection {
+  id: string;
+  name: string;
+  connection_type: string;
+  config: Record<string, unknown>;
+  description: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ConnectionTypeSchema {
+  type: string;
+  title: string;
+  schema: Record<string, unknown>;
+}
+
+export interface ConnectionTestResult {
+  success: boolean;
+  message: string;
+  error?: string;
+}
+
+export interface ConnectionFormData {
+  name: string;
+  connection_type: string;
+  config: Record<string, unknown>;
+  secrets: Record<string, unknown>;
+  description?: string;
+}
+
+// =============================================================================
+// API Functions
+// =============================================================================
+
+export const getConnections = async (): Promise<Connection[]> => {
+  const response = await api.get<Connection[]>('/api/v1/connections');
+  return response.data;
+};
+
+export const getConnectionTypes = async (): Promise<ConnectionTypeSchema[]> => {
+  const response = await api.get<ConnectionTypeSchema[]>('/api/v1/connections/types');
+  return response.data;
+};
+
+// =============================================================================
+// Legacy API object for ConnectionsPage compatibility
+// =============================================================================
+
 export const connectionsApi = {
-  /**
-   * List all connections.
-   */
-  list: async (): Promise<ConnectionResponse[]> => {
-    const response = await api.get<ConnectionResponse[]>('/api/v1/connections');
+  list: async (): Promise<Connection[]> => getConnections(),
+
+  create: async (data: ConnectionFormData): Promise<Connection> => {
+    const response = await api.post<Connection>('/api/v1/connections', data);
     return response.data;
   },
 
-  /**
-   * Get a connection by ID.
-   */
-  get: async (id: string): Promise<ConnectionResponse> => {
-    const response = await api.get<ConnectionResponse>(`/api/v1/connections/${id}`);
+  update: async (id: string, data: Partial<ConnectionFormData>): Promise<Connection> => {
+    const response = await api.put<Connection>(`/api/v1/connections/${id}`, data);
     return response.data;
   },
 
-  /**
-   * Create a new connection.
-   */
-  create: async (
-    request: ConnectionCreateRequest
-  ): Promise<{ id: string; name: string; connection_type: string; message: string }> => {
-    const response = await api.post('/api/v1/connections', request);
-    return response.data;
-  },
-
-  /**
-   * Update an existing connection.
-   */
-  update: async (
-    id: string,
-    request: ConnectionUpdateRequest
-  ): Promise<{ id: string; name: string; message: string }> => {
-    const response = await api.put(`/api/v1/connections/${id}`, request);
-    return response.data;
-  },
-
-  /**
-   * Delete a connection.
-   */
   delete: async (id: string): Promise<void> => {
     await api.delete(`/api/v1/connections/${id}`);
   },
 
-  /**
-   * Test a connection.
-   */
   test: async (id: string): Promise<ConnectionTestResult> => {
-    const response = await api.post<ConnectionTestResult>(
-      `/api/v1/connections/${id}/test`
-    );
+    const response = await api.post<ConnectionTestResult>(`/api/v1/connections/${id}/test`);
     return response.data;
   },
 };

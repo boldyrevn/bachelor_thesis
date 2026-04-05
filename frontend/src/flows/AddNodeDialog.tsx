@@ -1,11 +1,13 @@
 /**
  * AddNodeDialog — modal for adding a new node to the pipeline canvas
  *
- * Features:
+ * Shows:
  * - Scrollable list of available node types (fetched from API)
  * - Description of the selected node type
- * - Summary of input parameters with types
+ * - Summary of input parameters with their types (read-only preview)
  * - Custom name field (falls back to node type title if not provided)
+ *
+ * Actual parameter configuration happens in the right panel after the node is added.
  */
 
 import { useState, useEffect, useCallback } from 'react';
@@ -23,10 +25,12 @@ import {
   Divider,
   Loader,
   Alert,
+  ActionIcon,
+  Tooltip,
 } from '@mantine/core';
-import { IconAlertCircle, IconCube } from '@tabler/icons-react';
+import { IconAlertCircle, IconCube, IconRefresh } from '@tabler/icons-react';
 import type { NodeType } from '../types/nodeType';
-import { getNodeTypes } from '../api/nodeTypes';
+import { getNodeTypes, scanNodeTypes } from '../api/nodeTypes';
 
 interface AddNodeDialogProps {
   opened: boolean;
@@ -49,36 +53,115 @@ function getTypeLabel(schemaType: string): string {
   return typeMap[schemaType] || schemaType;
 }
 
+/**
+ * Check if a property represents a connection reference.
+ * Handles both direct markers and $ref -> $defs lookups.
+ */
+function isConnectionType(
+  propSchema: Record<string, unknown>,
+  rootSchema?: Record<string, unknown>,
+): string | null {
+  // Direct marker on the property
+  if (propSchema['x-connection-type']) {
+    return propSchema['x-connection-type'] as string;
+  }
+
+  // $ref to a definition that has x-connection-type
+  const allOf = propSchema.allOf as Record<string, unknown>[] | undefined;
+  if (allOf?.length) {
+    for (const item of allOf) {
+      const ref = item.$ref as string | undefined;
+      if (ref?.startsWith('#/$defs/')) {
+        const defName = ref.replace('#/$defs/', '');
+        const defs = rootSchema?.$defs as Record<string, Record<string, unknown>> | undefined;
+        if (defs?.[defName]?.['x-connection-type']) {
+          return defs[defName]['x-connection-type'] as string;
+        }
+      }
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Check if a property is a multiline string
+ */
+function isMultilineString(propSchema: Record<string, unknown>): boolean {
+  return (propSchema['format'] as string) === 'multiline';
+}
+
+/**
+ * Build a human-readable type label including connection type info
+ */
+function buildTypeLabel(
+  propSchema: Record<string, unknown>,
+  rootSchema?: Record<string, unknown>,
+): string {
+  const connType = isConnectionType(propSchema, rootSchema);
+  if (connType) {
+    const titles: Record<string, string> = {
+      postgres: 'PostgreSQL Connection',
+      clickhouse: 'ClickHouse Connection',
+      s3: 'S3 Connection',
+      spark: 'Spark Connection',
+    };
+    return titles[connType] || `${connType} Connection`;
+  }
+
+  if (isMultilineString(propSchema)) {
+    return 'text (multiline)';
+  }
+
+  return getTypeLabel(propSchema.type as string);
+}
+
 export function AddNodeDialog({ opened, onClose, onAdd }: AddNodeDialogProps) {
   const [nodeTypes, setNodeTypes] = useState<NodeType[]>([]);
   const [selectedNodeType, setSelectedNodeType] = useState<NodeType | null>(null);
   const [customName, setCustomName] = useState('');
   const [loading, setLoading] = useState(false);
+  const [scanning, setScanning] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   // Fetch node types when dialog opens
   useEffect(() => {
     if (!opened) return;
 
-    const fetchTypes = async () => {
-      setLoading(true);
-      setError(null);
-      try {
-        const response = await getNodeTypes();
-        setNodeTypes(response.node_types);
-        if (response.node_types.length > 0) {
-          setSelectedNodeType(response.node_types[0]);
-        }
-      } catch (err) {
-        setError('Не удалось загрузить список нод. Убедитесь, что бэкенд запущен.');
-        console.error('Failed to fetch node types:', err);
-      } finally {
-        setLoading(false);
-      }
-    };
-
     fetchTypes();
   }, [opened]);
+
+  const fetchTypes = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const response = await getNodeTypes();
+      setNodeTypes(response.node_types);
+      if (response.node_types.length > 0) {
+        setSelectedNodeType(response.node_types[0]);
+      }
+    } catch (err) {
+      setError('Не удалось загрузить список нод. Убедитесь, что бэкенд запущен.');
+      console.error('Failed to fetch node types:', err);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  const handleRescan = useCallback(async () => {
+    setScanning(true);
+    try {
+      const stats = await scanNodeTypes();
+      console.log('Node scan result:', stats);
+      // Reload node types after scanning
+      await fetchTypes();
+    } catch (err) {
+      setError('Не удалось выполнить сканирование нод.');
+      console.error('Failed to scan node types:', err);
+    } finally {
+      setScanning(false);
+    }
+  }, [fetchTypes]);
 
   // Reset state when dialog closes
   useEffect(() => {
@@ -101,7 +184,22 @@ export function AddNodeDialog({ opened, onClose, onAdd }: AddNodeDialogProps) {
     <Modal
       opened={opened}
       onClose={onClose}
-      title="Добавить Node"
+      title={
+        <Group justify="space-between" style={{ width: '100%' }}>
+          <Text fw={700} size="lg">Добавить Node</Text>
+          <Tooltip label="Пересканировать ноды на сервере">
+            <ActionIcon
+              variant="subtle"
+              size="sm"
+              onClick={handleRescan}
+              loading={scanning}
+              disabled={scanning}
+            >
+              <IconRefresh size={16} />
+            </ActionIcon>
+          </Tooltip>
+        </Group>
+      }
       size="lg"
       centered
     >
@@ -161,7 +259,7 @@ export function AddNodeDialog({ opened, onClose, onAdd }: AddNodeDialogProps) {
               </ScrollArea.Autosize>
             </Box>
 
-            {/* Selected node description */}
+            {/* Selected node details */}
             {selectedNodeType && (
               <>
                 <Divider />
@@ -175,35 +273,38 @@ export function AddNodeDialog({ opened, onClose, onAdd }: AddNodeDialogProps) {
                   </Text>
                 </Box>
 
-                {/* Input parameters summary */}
-                <Box>
-                  <Text fw={600} size="sm" mb="xs">
-                    Входные параметры
-                  </Text>
-                  {Object.entries(selectedNodeType.input_schema.properties).length > 0 ? (
+                {/* Input parameters summary (read-only) */}
+                {Object.keys(selectedNodeType.input_schema.properties || {}).length > 0 && (
+                  <Box>
+                    <Text fw={600} size="sm" mb="xs">
+                      Входные параметры
+                    </Text>
                     <Stack gap={6}>
                       {Object.entries(selectedNodeType.input_schema.properties).map(
-                        ([paramName, propSchema]) => (
-                          <Group key={paramName} gap="xs" wrap="nowrap">
-                            <Code>{paramName}</Code>
-                            <Text size="xs" c="dimmed">
-                              {getTypeLabel(propSchema.type)}
-                            </Text>
-                            {selectedNodeType.input_schema.required?.includes(paramName) && (
-                              <Badge size="sm" color="red" variant="light">
-                                обязательный
-                              </Badge>
-                            )}
-                          </Group>
-                        )
+                        ([paramName, propSchema]) => {
+                          const schema = propSchema as Record<string, unknown>;
+                          const typeLabel = buildTypeLabel(schema, selectedNodeType.input_schema as Record<string, unknown>);
+                          const isRequired =
+                            selectedNodeType.input_schema.required?.includes(paramName);
+
+                          return (
+                            <Group key={paramName} gap="xs" wrap="nowrap">
+                              <Code>{paramName}</Code>
+                              <Text size="xs" c="dimmed">
+                                {typeLabel}
+                              </Text>
+                              {isRequired && (
+                                <Badge size="sm" color="red" variant="light">
+                                  обязательный
+                                </Badge>
+                              )}
+                            </Group>
+                          );
+                        }
                       )}
                     </Stack>
-                  ) : (
-                    <Text size="sm" c="dimmed">
-                      Нет входных параметров
-                    </Text>
-                  )}
-                </Box>
+                  </Box>
+                )}
 
                 {/* Custom name input */}
                 <Box>
