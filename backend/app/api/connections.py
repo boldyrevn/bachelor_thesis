@@ -4,13 +4,16 @@ import logging
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.connections.service import connection_testing_service
+from app.connections.service import test_connection
 from app.models.connection import Connection, ConnectionType
-from app.schemas.connection import validate_connection_config
+from app.schemas.connection import (
+    CONNECTION_CLASSES,
+    get_connection_class,
+)
 
 from .dependencies import get_db_session
 
@@ -38,13 +41,20 @@ class ConnectionUpdateRequest(BaseModel):
     description: str | None = None
 
 
+class ConnectionTypeInfo(BaseModel):
+    """Connection type metadata for frontend form generation."""
+
+    type: str
+    title: str
+    json_schema: dict[str, Any] = Field(alias="schema")
+
+
 async def get_connection_or_404(
     connection_id: str, session: AsyncSession = Depends(get_db_session)
 ) -> Connection:
     """Get connection by ID or raise 404."""
     import uuid
 
-    # Validate UUID format
     try:
         uuid.UUID(connection_id)
     except ValueError:
@@ -67,6 +77,43 @@ async def get_connection_or_404(
     return connection
 
 
+def _validate_and_split(
+    connection_type: str, config: dict[str, Any], secrets: dict[str, Any]
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Validate connection via typed class and split for DB storage.
+
+    Returns:
+        (config_dict, secrets_dict) ready for DB storage
+    """
+    conn_cls = get_connection_class(connection_type)
+    merged = {**config, **secrets}
+    instance = conn_cls(**merged)
+    return instance.split_for_db()
+
+
+@connections_router.get(
+    "/types",
+    response_model=list[ConnectionTypeInfo],
+    summary="List available connection types with schemas",
+)
+async def list_connection_types() -> list[ConnectionTypeInfo]:
+    """Return metadata for all connection types for frontend form generation."""
+    titles = {
+        "postgres": "PostgreSQL",
+        "clickhouse": "ClickHouse",
+        "s3": "S3 / MinIO",
+        "spark": "Apache Spark",
+    }
+    return [
+        ConnectionTypeInfo(
+            type=conn_type,
+            title=titles.get(conn_type, conn_type),
+            schema=conn_cls.model_json_schema(),
+        )
+        for conn_type, conn_cls in CONNECTION_CLASSES.items()
+    ]
+
+
 @connections_router.post(
     "",
     response_model=dict[str, Any],
@@ -77,27 +124,11 @@ async def create_connection(
     request: ConnectionCreateRequest,
     session: AsyncSession = Depends(get_db_session),
 ) -> dict[str, Any]:
-    """
-    Create a new connection.
+    """Create a new connection."""
+    validated_config, validated_secrets = _validate_and_split(
+        request.connection_type.value, request.config, request.secrets
+    )
 
-    - **name**: Unique connection name
-    - **connection_type**: Type of connection (postgres, clickhouse, s3, spark)
-    - **config**: Connection configuration (type-specific)
-    - **secrets**: Connection secrets (passwords, keys)
-    - **description**: Optional description
-    """
-    # Validate connection type and encode secrets
-    try:
-        validated_config, validated_secrets = validate_connection_config(
-            request.connection_type.value, request.config, request.secrets
-        )
-    except ValueError as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Validation error: {str(e)}",
-        )
-
-    # Check for duplicate name
     result = await session.execute(
         select(Connection).where(Connection.name == request.name)
     )
@@ -107,7 +138,6 @@ async def create_connection(
             detail=f"Connection with name '{request.name}' already exists",
         )
 
-    # Create connection
     connection = Connection(
         name=request.name,
         connection_type=request.connection_type,
@@ -188,14 +218,9 @@ async def update_connection(
     request: ConnectionUpdateRequest,
     session: AsyncSession = Depends(get_db_session),
 ) -> dict[str, Any]:
-    """
-    Update an existing connection.
-
-    Only provided fields will be updated.
-    """
+    """Update an existing connection."""
     connection = await get_connection_or_404(connection_id, session)
 
-    # Check for duplicate name if name is being changed
     if request.name and request.name != connection.name:
         result = await session.execute(
             select(Connection).where(Connection.name == request.name)
@@ -207,33 +232,23 @@ async def update_connection(
             )
         connection.name = request.name
 
-    # Validate and update config if provided
-    if request.config is not None:
+    if request.config is not None or request.secrets is not None:
+        current_config = connection.config if request.config is None else request.config
+        current_secrets = (
+            connection.secrets if request.secrets is None else request.secrets
+        )
         try:
-            validated_config, _ = validate_connection_config(
-                connection.connection_type.value, request.config, connection.secrets
+            validated_config, validated_secrets = _validate_and_split(
+                connection.connection_type.value, current_config, current_secrets
             )
             connection.config = validated_config
-        except ValueError as e:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Validation error: {str(e)}",
-            )
-
-    # Validate and update secrets if provided
-    if request.secrets is not None:
-        try:
-            _, validated_secrets = validate_connection_config(
-                connection.connection_type.value, connection.config, request.secrets
-            )
             connection.secrets = validated_secrets
-        except ValueError as e:
+        except (ValueError, TypeError) as e:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Validation error: {str(e)}",
             )
 
-    # Update description if provided
     if request.description is not None:
         connection.description = request.description
 
@@ -270,17 +285,12 @@ async def delete_connection(
     response_model=dict[str, Any],
     summary="Test connection",
 )
-async def test_connection(
+async def test_connection_endpoint(
     connection: Connection = Depends(get_connection_or_404),
 ) -> dict[str, Any]:
-    """
-    Test a connection to verify it works.
-
-    This endpoint attempts to establish a connection using the stored credentials.
-    Returns success status and a message describing the result.
-    """
-    result = await connection_testing_service.test_connection(
-        connection.connection_type,
+    """Test a connection to verify it works."""
+    result = await test_connection(
+        connection.connection_type.value,
         connection.config,
         connection.secrets,
     )

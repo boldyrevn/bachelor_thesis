@@ -10,8 +10,6 @@ from app.models.connection import Connection, ConnectionType
 
 @pytest.mark.asyncio
 class TestConnectionCRUD:
-    """Test Connection CRUD operations."""
-
     async def test_create_postgres_connection(
         self, client: AsyncClient, db_session: AsyncSession
     ) -> None:
@@ -449,3 +447,38 @@ class TestConnectionTestEndpoint:
         # Connection should fail (unreachable host)
         assert data["success"] is False
         assert "error" in data
+
+
+@pytest.mark.asyncio
+class TestConnectionTypesEndpoint:
+    """Test GET /api/v1/connections/types endpoint."""
+
+    async def test_list_connection_types(self, client: AsyncClient) -> None:
+        """Test listing all connection types with schemas."""
+        response = await client.get("/api/v1/connections/types")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert len(data) == 4
+
+        type_names = {item["type"] for item in data}
+        assert type_names == {"postgres", "clickhouse", "s3", "spark"}
+
+        # Verify each has a schema with x-connection-type marker
+        for item in data:
+            assert "title" in item
+            assert "schema" in item
+            assert item["schema"].get("x-connection-type") == item["type"]
+
+    async def test_postgres_schema_structure(self, client: AsyncClient) -> None:
+        """Test PostgreSQL schema has expected fields."""
+        response = await client.get("/api/v1/connections/types")
+        data = response.json()
+
+        postgres = next(item for item in data if item["type"] == "postgres")
+        props = postgres["schema"]["properties"]
+        assert "host" in props
+        assert "port" in props
+        assert "database" in props
+        assert "username" in props
+        assert "password" in props
