@@ -297,12 +297,53 @@ class TextOutputNode(BaseNode[TextOutputInput, TextOutputOutput]):
 
 ---
 
+### Session 8 — Pipeline Save/Load, List Page & Node Param Validation ✅ COMPLETED
+
+**Goal:** Implement pipeline save/load, pipeline list page with CRUD, and backend validation of node parameters.
+
+**Completed Files:**
+- ✅ `frontend/src/api/pipelines.ts` — NEW: API client for pipeline CRUD + run endpoints
+- ✅ `frontend/src/components/PipelineListPage.tsx` — NEW: Pipeline list table with create/edit/run/delete
+- ✅ `frontend/src/context/HeaderActionsContext.tsx` — NEW: Context for registering page-level header actions
+- ✅ `frontend/src/flows/PipelineEditor.tsx` — Rewritten: Save button in header, Name field in left panel, redirect on save, node selection sync
+- ✅ `frontend/src/App.tsx` — HeaderActionsProvider, HeaderActionsSlot, routing updates
+- ✅ `frontend/src/types/nodeType.ts` — Added index signature for React Flow compatibility
+- ✅ `backend/app/orchestration/graph_resolver.py` — Added `validate_node_params()` to validate node configs against Pydantic schemas
+- ✅ `backend/tests/unit/test_pipeline_executor.py` — Fixed node ID conventions (underscores)
+- ✅ `backend/tests/integration/test_pipelines.py` — Fixed node ID conventions
+
+**Features Implemented:**
+- **Save Button in Header**: Registered via HeaderActionsContext, appears next to breadcrumbs
+- **Name Field in Left Panel**: No modal dialog — pipeline name is always visible and editable
+- **Auto-redirect on Save**: After successful save, navigate to `/pipelines` list page
+- **Pipeline List Page**: Table with name, graph stats (nodes/edges), created date, actions (edit/run/delete)
+- **Create Pipeline Modal**: On list page with name + description fields
+- **Node Selection Sync**: Click node on canvas → right panel shows params; click node in list → canvas centers + highlights; click X → deselect
+- **Stale Closure Fix**: `graphRef` and `formValuesRef` for latest state in save button closure
+- **Node Parameter Validation**: Backend validates node configs against input_schema Pydantic models in `validate_pipeline_graph()`
+- **Error Handling**: Pydantic validation errors shown as user-friendly toast notifications; duplicate name conflict modal
+
+**API Changes:**
+- `GET /api/v1/pipelines` — List all pipelines
+- `GET /api/v1/pipelines/{id}` — Get single pipeline
+- `POST /api/v1/pipelines` — Create pipeline (with graph validation)
+- `PUT /api/v1/pipelines/{id}` — Update pipeline (with graph validation)
+- `DELETE /api/v1/pipelines/{id}` — Delete pipeline
+
+**Test Results:** 153 tests passing (all unit + integration)
+
+**Verified:**
+- Full save cycle: create pipeline → add node → save → appears in list → edit → save again
+- Validation: empty required params rejected with error toast
+- Duplicate name: conflict modal shown
+- Type check: `npx tsc --noEmit` clean for all frontend files
+
+---
+
 ## Next Steps
 
 ### Frontend Tasks (remaining)
-6. **Pipeline List Page** — List, create, delete pipelines (placeholder exists)
-7. **Pipeline Editor** — Node configuration forms in right panel (parameter editing for connection fields, primitives, multiline strings), save/load API integration, run + SSE log viewer
-
-### Backend Tasks
-- Pipeline run execution integration
-- SSE log streaming to frontend
+- ~~Pipeline List Page~~ ✅ COMPLETED (Session 8)
+- ~~Save/Load Pipeline~~ ✅ COMPLETED (Session 8)
+- Pipeline Run + SSE Log Viewer
+- Pipeline Parameters (left panel) — dynamic key-value editor
