@@ -1,0 +1,89 @@
+{
+    "edges": [
+        {
+            "id": "xy-edge__multiply_two_numberssource-bottom-text_outputtarget-top",
+            "source": "multiply_two_numbers",
+            "target": "text_output",
+            "source_handle": "source-bottom",
+            "target_handle": "target-top"
+        }
+    ],
+    "nodes": [
+        {
+            "id": "multiply_two_numbers",
+            "data": {
+                "label": "multiply_two_numbers",
+                "config": {
+                    "a": "2",
+                    "b": "23"
+                },
+                "nodeType": "multiply_two_numbers"
+            },
+            "type": "multiply_two_numbers",
+            "position": {
+                "x": 238.86236042315022,
+                "y": 239.27457479775342
+            }
+        },
+        {
+            "id": "text_output",
+            "data": {
+                "label": "text_output",
+                "config": {
+                    "message": "{{ multiply_two_numbers.result }}"
+                },
+                "nodeType": "text_output"
+            },
+            "type": "text_output",
+            "position": {
+                "x": 423.68960659614163,
+                "y": 438.8118021157509
+            }
+        }
+    ]
+},
+{
+    "name": "skibidi_pipe",
+    "graph_definition": {
+        "nodes": [
+            {
+                "id": "postgres_query",
+                "type": "postgres_query",
+                "position": {
+                    "x": 336,
+                    "y": 278
+                },
+                "data": {
+                    "label": "postgres_query",
+                    "nodeType": "postgres_query",
+                    "config": {}
+                }
+            }
+        ],
+        "edges": []
+    }
+}
+{
+    "name": "skibidi_pipe",
+    "graph_definition": {
+        "nodes": [
+            {
+                "id": "postgres_query",
+                "type": "postgres_query",
+                "position": {
+                    "x": 336,
+                    "y": 278
+                },
+                "data": {
+                    "label": "postgres_query",
+                    "nodeType": "postgres_query",
+                    "config": {
+                        "connection": "47557d04-1ad2-4415-8049-800ac278844e",
+                        "include_system_schemas": true
+                    }
+                }
+            }
+        ],
+        "edges": []
+    }
+}

@@ -1,0 +1,200 @@
+"""Pipeline run API endpoints for listing and viewing runs."""
+
+import os
+
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.api.dependencies import get_db_session
+from app.core.config import settings
+from app.models.pipeline import Pipeline
+from app.models.pipeline_run import PipelineRun, RunStatus
+from app.models.node_run import NodeRun
+
+router = APIRouter(prefix="/api/v1/pipelines", tags=["pipeline-runs"])
+
+# Separate router for global runs endpoint (must be registered before parameterized routes)
+global_runs_router = APIRouter(prefix="/api/v1", tags=["pipeline-runs"])
+
+
+@global_runs_router.get("/pipelines/runs")
+async def list_all_runs(
+    limit: int = 50,
+    offset: int = 0,
+    db: AsyncSession = Depends(get_db_session),
+) -> dict:
+    """List all pipeline runs across all pipelines.
+
+    Args:
+        limit: Max number of runs to return
+        offset: Offset for pagination
+        db: Database session
+
+    Returns:
+        List of pipeline runs with count
+    """
+    result = await db.execute(
+        select(PipelineRun)
+        .order_by(PipelineRun.started_at.desc())
+        .offset(offset)
+        .limit(limit)
+    )
+    runs = result.scalars().all()
+
+    # Count total
+    count_result = await db.execute(select(PipelineRun.id))
+    total = len(count_result.scalars().all())
+
+    return {
+        "runs": [_run_to_dict(run) for run in runs],
+        "total": total,
+    }
+
+
+@router.get("/{pipeline_id}/runs")
+async def list_pipeline_runs(
+    pipeline_id: str,
+    limit: int = 20,
+    offset: int = 0,
+    db: AsyncSession = Depends(get_db_session),
+) -> dict:
+    """List all runs for a pipeline.
+
+    Args:
+        pipeline_id: Pipeline UUID
+        limit: Max number of runs to return
+        offset: Offset for pagination
+        db: Database session
+
+    Returns:
+        List of pipeline runs with count
+    """
+    # Verify pipeline exists
+    result = await db.execute(select(Pipeline).where(Pipeline.id == pipeline_id))
+    if not result.scalar_one_or_none():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Pipeline '{pipeline_id}' not found",
+        )
+
+    # Get runs
+    result = await db.execute(
+        select(PipelineRun)
+        .where(PipelineRun.pipeline_id == pipeline_id)
+        .order_by(PipelineRun.started_at.desc())
+        .offset(offset)
+        .limit(limit)
+    )
+    runs = result.scalars().all()
+
+    return {
+        "runs": [_run_to_dict(run) for run in runs],
+        "total": len(runs),
+    }
+
+
+@router.get("/runs/{run_id}/detail")
+async def get_pipeline_run_detail(
+    run_id: str,
+    db: AsyncSession = Depends(get_db_session),
+) -> dict:
+    """Get a pipeline run with its node runs.
+
+    Args:
+        run_id: Pipeline run UUID
+        db: Database session
+
+    Returns:
+        Pipeline run with node_runs included
+    """
+    # Get pipeline run
+    result = await db.execute(select(PipelineRun).where(PipelineRun.id == run_id))
+    run = result.scalar_one_or_none()
+
+    if not run:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Pipeline run '{run_id}' not found",
+        )
+
+    # Get node runs
+    result = await db.execute(select(NodeRun).where(NodeRun.pipeline_run_id == run_id))
+    node_runs = result.scalars().all()
+
+    return {
+        "run": _run_to_dict(run),
+        "node_runs": [_node_run_to_dict(nr) for nr in node_runs],
+    }
+
+
+@router.get("/runs/{run_id}/nodes/{node_id}/logs")
+async def get_node_run_logs(
+    run_id: str,
+    node_id: str,
+    db: AsyncSession = Depends(get_db_session),
+) -> dict[str, str]:
+    """Get log contents for a specific node run.
+
+    Reads from log file on disk.
+
+    Args:
+        run_id: Pipeline run UUID
+        node_id: Node ID within the run
+        db: Database session
+
+    Returns:
+        Log file contents
+    """
+    log_dir = settings.LOG_DIR
+    log_file = os.path.join(log_dir, run_id, f"{node_id}.log")
+
+    if not os.path.exists(log_file):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Log file for node '{node_id}' not found",
+        )
+
+    with open(log_file, "r") as f:
+        content = f.read()
+
+    return {"logs": content}
+
+
+def _run_to_dict(run: PipelineRun) -> dict:
+    """Convert PipelineRun to dict."""
+    duration = None
+    if run.started_at and run.completed_at:
+        delta = run.completed_at - run.started_at
+        duration = delta.total_seconds()
+
+    return {
+        "id": run.id,
+        "pipeline_id": run.pipeline_id,
+        "status": run.status.value if isinstance(run.status, RunStatus) else run.status,
+        "parameters": run.parameters,
+        "started_at": run.started_at.isoformat() if run.started_at else None,
+        "completed_at": run.completed_at.isoformat() if run.completed_at else None,
+        "error_message": run.error_message,
+        "duration_seconds": duration,
+    }
+
+
+def _node_run_to_dict(nr: NodeRun) -> dict:
+    """Convert NodeRun to dict."""
+    return {
+        "id": nr.id,
+        "pipeline_run_id": nr.pipeline_run_id,
+        "node_id": nr.node_id,
+        "node_type": nr.node_type,
+        "status": nr.status.value if isinstance(nr.status, RunStatus) else nr.status,
+        "output_values": nr.output_values,
+        "started_at": nr.started_at.isoformat() if nr.started_at else None,
+        "completed_at": nr.completed_at.isoformat() if nr.completed_at else None,
+        "error_message": nr.error_message,
+    }
+
+
+__all__ = ["pipeline_runs_router", "global_runs_router"]
+
+pipeline_runs_router = router

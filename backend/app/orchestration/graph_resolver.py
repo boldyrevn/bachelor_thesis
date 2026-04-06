@@ -249,7 +249,9 @@ def validate_pipeline_graph(
 
 
 def validate_node_params(graph_definition: dict[str, Any]) -> str | None:
-    """Validate node config against node input schemas.
+    """Validate node config: required fields present, connection fields are valid UUIDs.
+
+    Full type validation is deferred to runtime (when Jinja2 templates are resolved).
 
     Args:
         graph_definition: React Flow graph state
@@ -257,7 +259,10 @@ def validate_node_params(graph_definition: dict[str, Any]) -> str | None:
     Returns:
         Error message string or None if valid
     """
+    import uuid
+
     from app.nodes.registry import NodeRegistry
+    from app.schemas.connection import BaseConnection
 
     # Ensure registry is populated (scan if empty)
     if not NodeRegistry._registry:
@@ -283,10 +288,41 @@ def validate_node_params(graph_definition: dict[str, Any]) -> str | None:
 
         config = node_data.get("data", {}).get("config", {})
 
-        try:
-            node_class.input_schema.model_validate(config)
-        except Exception as e:
-            errors.append(f"Node '{node_id}' ({node_type}): {e}")
+        for field_name, field_info in node_class.input_schema.model_fields.items():
+            value = config.get(field_name)
+
+            # Check if this is a connection field
+            is_connection = False
+            try:
+                if issubclass(field_info.annotation, BaseConnection):
+                    is_connection = True
+            except TypeError:
+                pass
+
+            if is_connection:
+                # Connection fields must be valid UUID strings
+                if isinstance(value, str):
+                    try:
+                        uuid.UUID(value)
+                    except ValueError:
+                        errors.append(
+                            f"Node '{node_id}' ({node_type}): "
+                            f"'{field_name}' must be a valid connection UUID"
+                        )
+                elif value is None and field_info.is_required():
+                    errors.append(
+                        f"Node '{node_id}' ({node_type}): "
+                        f"'{field_name}' is required"
+                    )
+                # If value is already a BaseConnection instance — OK
+            else:
+                # Non-connection: only check required fields are not empty
+                if value is None or value == "":
+                    if field_info.is_required():
+                        errors.append(
+                            f"Node '{node_id}' ({node_type}): "
+                            f"'{field_name}' is required"
+                        )
 
     if errors:
         return "Validation errors:\n" + "\n".join(f"  - {e}" for e in errors)

@@ -34,8 +34,9 @@ export function useHeaderActions() {
  */
 export function useRegisterHeaderAction(actions: ReactNode) {
   const { setActions } = useContext(HeaderActionsContext);
-  // Only update when the actions reference actually changes
   useEffect(() => {
     setActions(actions);
+    // Cleanup: reset actions when component unmounts
+    return () => setActions(null);
   }, [actions, setActions]);
 }

@@ -1,4 +1,5 @@
 import { BrowserRouter, Routes, Route, Link, useLocation } from 'react-router-dom';
+import { useState, useEffect } from 'react';
 import {
   AppShell,
   Burger,
@@ -19,14 +20,20 @@ import {
   IconChevronRight,
   IconChevronsLeft,
   IconChevronsRight,
+  IconPlayerPlay,
 } from '@tabler/icons-react';
 import { ConnectionsPage } from './components/ConnectionsPage';
 import { PipelinesPage } from './components/PipelineListPage';
+import { PipelineRunsPage } from './components/PipelineRunsPage';
 import { PipelineEditor } from './flows/PipelineEditor';
+import { PipelineRunPage } from './flows/PipelineRunPage';
 import { HeaderActionsProvider, useHeaderActions } from './context/HeaderActionsContext';
+import { PipelineNameProvider, usePipelineName } from './context/PipelineNameContext';
+import { getPipeline } from './api/pipelines';
 
 /**
- * Breadcrumb items for each route
+ * Static breadcrumb map for simple routes
+ * Dynamic routes (e.g. /pipelines/:id/update) use DynamicBreadcrumbs component
  */
 const BREADCRUMB_MAP: Record<string, { label: string; href?: string }[]> = {
   '/': [{ label: 'Home', href: '/' }],
@@ -38,10 +45,9 @@ const BREADCRUMB_MAP: Record<string, { label: string; href?: string }[]> = {
     { label: 'Home', href: '/' },
     { label: 'Pipelines' },
   ],
-  '/pipelines/new': [
+  '/runs': [
     { label: 'Home', href: '/' },
-    { label: 'Pipelines', href: '/pipelines' },
-    { label: 'New Pipeline' },
+    { label: 'Runs' },
   ],
 };
 
@@ -175,6 +181,12 @@ function Navigation({
           label="Pipelines"
           collapsed={collapsed}
         />
+        <NavItem
+          to="/runs"
+          icon={<IconPlayerPlay size={ICON_SIZE} />}
+          label="Runs"
+          collapsed={collapsed}
+        />
       </nav>
 
       {/* Collapse toggle button — fixed width container for centering, full width border */}
@@ -223,19 +235,127 @@ function PageWrapper({ children }: { children: React.ReactNode }) {
   return <Box p="md">{children}</Box>;
 }
 
+/**
+ * Dynamic breadcrumbs component that fetches pipeline names for dynamic routes
+ */
+function DynamicBreadcrumbs() {
+  const location = useLocation();
+  const { pipelineName, setPipelineName } = usePipelineName();
+
+  const path = location.pathname;
+  const isUpdateRoute = /^\/pipelines\/[^/]+\/update$/.test(path);
+  const isRunRoute = /^\/pipelines\/[^/]+\/runs\/[^/]+$/.test(path);
+  const isDynamicRoute = isUpdateRoute || isRunRoute;
+
+  // Extract pipelineId and runId from pathname directly (useParams doesn't work outside <Routes>)
+  const pipelineIdMatch = path.match(/^\/pipelines\/([^/]+)/);
+  const pipelineId = pipelineIdMatch ? pipelineIdMatch[1] : null;
+  const runIdMatch = path.match(/^\/pipelines\/[^/]+\/runs\/([^/]+)$/);
+  const runId = runIdMatch ? runIdMatch[1] : null;
+
+  // Fetch pipeline name when on dynamic route
+  useEffect(() => {
+    if (!isDynamicRoute || !pipelineId) {
+      setPipelineName(null);
+      return;
+    }
+
+    getPipeline(pipelineId)
+      .then((p) => {
+        setPipelineName(p.name);
+      })
+      .catch((err) => {
+        console.error('[DynamicBreadcrumbs] Failed to fetch pipeline:', err);
+        setPipelineName('Unknown');
+      });
+  }, [pipelineId]);
+
+  // Check if we're on a static route first
+  const staticBreadcrumbs = BREADCRUMB_MAP[path];
+  if (staticBreadcrumbs) {
+    return (
+      <Breadcrumbs separator={<IconChevronRight size={14} />} ml="xl" style={{ flex: 1 }}>
+        {staticBreadcrumbs.map((crumb, index) =>
+          crumb.href ? (
+            <Anchor key={index} component={Link} to={crumb.href} underline="never" c="dimmed">
+              {crumb.label}
+            </Anchor>
+          ) : (
+            <Text key={index} c="dimmed" size="sm">
+              {crumb.label}
+            </Text>
+          )
+        )}
+      </Breadcrumbs>
+    );
+  }
+
+  // Dynamic route: /pipelines/:pipelineId/update
+  if (isUpdateRoute) {
+    return (
+      <Breadcrumbs separator={<IconChevronRight size={14} />} ml="xl" style={{ flex: 1 }}>
+        <Anchor component={Link} to="/" underline="never" c="dimmed">
+          Home
+        </Anchor>
+        <Anchor component={Link} to="/pipelines" underline="never" c="dimmed">
+          Pipelines
+        </Anchor>
+        <Text c="dimmed" size="sm">
+          {pipelineName || 'Loading...'}
+        </Text>
+        <Text c="dimmed" size="sm">
+          Update
+        </Text>
+      </Breadcrumbs>
+    );
+  }
+
+  // Dynamic route: /pipelines/:pipelineId/runs/:runId
+  if (isRunRoute) {
+    return (
+      <Breadcrumbs separator={<IconChevronRight size={14} />} ml="xl" style={{ flex: 1 }}>
+        <Anchor component={Link} to="/" underline="never" c="dimmed">
+          Home
+        </Anchor>
+        <Anchor component={Link} to="/pipelines" underline="never" c="dimmed">
+          Pipelines
+        </Anchor>
+        {pipelineName ? (
+          <Anchor component={Link} to={`/pipelines/${pipelineId}/update`} underline="never" c="dimmed">
+            {pipelineName}
+          </Anchor>
+        ) : (
+          <Text c="dimmed" size="sm">
+            Loading...
+          </Text>
+        )}
+        <Text c="dimmed" size="sm">
+          Run {runId?.slice(0, 8)}...
+        </Text>
+      </Breadcrumbs>
+    );
+  }
+
+  // Fallback
+  return (
+    <Breadcrumbs separator={<IconChevronRight size={14} />} ml="xl" style={{ flex: 1 }}>
+      <Anchor component={Link} to="/" underline="never" c="dimmed">
+        Home
+      </Anchor>
+    </Breadcrumbs>
+  );
+}
+
 function AppContent() {
   const location = useLocation();
   const [mobileOpened, { toggle: toggleMobile }] = useDisclosure();
   const [desktopOpened, { toggle: toggleDesktop }] = useDisclosure(false);
   const [navbarCollapsed, { toggle: toggleNavbar }] = useDisclosure(false);
 
-  // Build breadcrumbs from current path
-  const breadcrumbs = BREADCRUMB_MAP[location.pathname] || [
-    { label: 'Home', href: '/' },
-  ];
-
   const navbarWidth = navbarCollapsed ? NAVBAR_WIDTH_COLLAPSED : NAVBAR_WIDTH_EXPANDED;
-  const isEditor = location.pathname === '/pipelines/new';
+  const isEditor = location.pathname === '/pipelines/new'
+    || !!location.pathname.match(/^\/pipelines\/[^/]+\/update$/)
+    || !!location.pathname.match(/^\/pipelines\/[^/]+\/runs\/[^/]+$/);
 
   return (
     <AppShell
@@ -264,29 +384,7 @@ function AppContent() {
           </Group>
 
           {/* Breadcrumbs */}
-          <Breadcrumbs
-            separator={<IconChevronRight size={14} />}
-            ml="xl"
-            style={{ flex: 1 }}
-          >
-            {breadcrumbs.map((crumb, index) =>
-              crumb.href ? (
-                <Anchor
-                  key={index}
-                  component={Link}
-                  to={crumb.href}
-                  underline="never"
-                  c="dimmed"
-                >
-                  {crumb.label}
-                </Anchor>
-              ) : (
-                <Text key={index} c="dimmed" size="sm">
-                  {crumb.label}
-                </Text>
-              )
-            )}
-          </Breadcrumbs>
+          <DynamicBreadcrumbs />
           <HeaderActionsSlot />
         </Group>
       </AppShell.Header>
@@ -314,7 +412,17 @@ function AppContent() {
               </PageWrapper>
             }
           />
+          <Route
+            path="/runs"
+            element={
+              <PageWrapper>
+                <PipelineRunsPage />
+              </PageWrapper>
+            }
+          />
           <Route path="/pipelines/new" element={<PipelineEditor />} />
+          <Route path="/pipelines/:pipelineId/update" element={<PipelineEditor />} />
+          <Route path="/pipelines/:pipelineId/runs/:runId" element={<PipelineRunPage />} />
         </Routes>
       </AppShell.Main>
     </AppShell>
@@ -333,7 +441,9 @@ function App() {
   return (
     <BrowserRouter>
       <HeaderActionsProvider>
-        <AppContent />
+        <PipelineNameProvider>
+          <AppContent />
+        </PipelineNameProvider>
       </HeaderActionsProvider>
     </BrowserRouter>
   );

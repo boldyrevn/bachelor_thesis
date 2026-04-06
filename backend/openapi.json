@@ -448,6 +448,61 @@
         }
       }
     },
+    "/api/v1/pipelines/runs": {
+      "get": {
+        "tags": [
+          "pipeline-runs"
+        ],
+        "summary": "List All Runs",
+        "description": "List all pipeline runs across all pipelines.\n\nArgs:\n    limit: Max number of runs to return\n    offset: Offset for pagination\n    db: Database session\n\nReturns:\n    List of pipeline runs with count",
+        "operationId": "list_all_runs_api_v1_pipelines_runs_get",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 50,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 0,
+              "title": "Offset"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "title": "Response List All Runs Api V1 Pipelines Runs Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/pipelines": {
       "get": {
         "tags": [
@@ -786,6 +841,170 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/PipelineRunResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/pipelines/{pipeline_id}/runs": {
+      "get": {
+        "tags": [
+          "pipeline-runs"
+        ],
+        "summary": "List Pipeline Runs",
+        "description": "List all runs for a pipeline.\n\nArgs:\n    pipeline_id: Pipeline UUID\n    limit: Max number of runs to return\n    offset: Offset for pagination\n    db: Database session\n\nReturns:\n    List of pipeline runs with count",
+        "operationId": "list_pipeline_runs_api_v1_pipelines__pipeline_id__runs_get",
+        "parameters": [
+          {
+            "name": "pipeline_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Pipeline Id"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 20,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 0,
+              "title": "Offset"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "title": "Response List Pipeline Runs Api V1 Pipelines  Pipeline Id  Runs Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/pipelines/runs/{run_id}/detail": {
+      "get": {
+        "tags": [
+          "pipeline-runs"
+        ],
+        "summary": "Get Pipeline Run Detail",
+        "description": "Get a pipeline run with its node runs.\n\nArgs:\n    run_id: Pipeline run UUID\n    db: Database session\n\nReturns:\n    Pipeline run with node_runs included",
+        "operationId": "get_pipeline_run_detail_api_v1_pipelines_runs__run_id__detail_get",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Run Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "title": "Response Get Pipeline Run Detail Api V1 Pipelines Runs  Run Id  Detail Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/pipelines/runs/{run_id}/nodes/{node_id}/logs": {
+      "get": {
+        "tags": [
+          "pipeline-runs"
+        ],
+        "summary": "Get Node Run Logs",
+        "description": "Get log contents for a specific node run.\n\nReads from log file on disk.\n\nArgs:\n    run_id: Pipeline run UUID\n    node_id: Node ID within the run\n    db: Database session\n\nReturns:\n    Log file contents",
+        "operationId": "get_node_run_logs_api_v1_pipelines_runs__run_id__nodes__node_id__logs_get",
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Run Id"
+            }
+          },
+          {
+            "name": "node_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Node Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Get Node Run Logs Api V1 Pipelines Runs  Run Id  Nodes  Node Id  Logs Get"
                 }
               }
             }

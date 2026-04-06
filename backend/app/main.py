@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker, create_async
 from app.api.connections import connections_router
 from app.api.demo import demo_router
 from app.api.node_types import node_types_router
+from app.api.pipeline_runs import pipeline_runs_router, global_runs_router
 from app.api.pipelines import pipelines_router
 from app.core.config import settings, setup_logging
 from app.models.base import Base
@@ -109,7 +110,11 @@ def create_app() -> FastAPI:
     app.include_router(demo_router)
     app.include_router(connections_router)
     app.include_router(node_types_router)
+    # Global runs endpoint MUST be registered before pipelines_router
+    # to avoid /api/v1/pipelines/runs being caught by /{pipeline_id} routes
+    app.include_router(global_runs_router)
     app.include_router(pipelines_router)
+    app.include_router(pipeline_runs_router)
 
     return app
 

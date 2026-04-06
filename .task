@@ -1,90 +1,15 @@
-# Session 4: Pipeline Backend + Frontend Editor
+**Контекст**
+- Описание и архитектура проекта в @PROJECT.md 
+- Правила разработки (их нужно СТРОГО придерживаться) в @RULES.md 
+- Текущий прогресс описан в @PROGRESS.md 
 
-Read AI_CONTEXT.md for full context. Session 3 (Frontend Connections Page) is complete.
-
-## Tasks
-
-### Backend (Tasks 1-5)
-
-1. **Base Node Architecture** (`backend/app/nodes/`)
-   - Create `base.py` — abstract base class for all nodes
-   - Create `registry.py` — node type registry
-   - Create `text_output.py` — simple text output node (Hello World example)
-
-2. **Pipeline Execution** (`backend/app/orchestration/`)
-   - Create `executor.py` — orchestrates node execution via Celery
-   - Create `graph_resolver.py` — topological sort, cycle detection
-   - Create `context_builder.py` — resolves `{{ node_id.output }}` templates
-
-3. **Pipeline CRUD API** (`backend/app/api/pipelines.py`)
-   - POST `/api/v1/pipelines` — create pipeline
-   - GET `/api/v1/pipelines` — list pipelines
-   - GET `/api/v1/pipelines/{id}` — get pipeline details
-   - PUT `/api/v1/pipelines/{id}` — update pipeline
-   - DELETE `/api/v1/pipelines/{id}` — delete pipeline
-   - POST `/api/v1/pipelines/{id}/run` — start pipeline execution
-
-4. **Pipeline Run Logs** (`backend/app/api/pipeline_runs.py`)
-   - GET `/api/v1/pipeline-runs/{id}` — get run status
-   - GET `/api/v1/pipeline-runs/{id}/logs` — get logs (REST)
-   - GET `/api/v1/pipeline-runs/{id}/logs/stream` — **SSE stream** (real-time)
-
-5. **Integration Tests** (`backend/tests/integration/test_pipelines.py`)
-   - Test pipeline creation
-   - Test pipeline execution (text output node)
-   - Test template resolution `{{ node_id.output }}`
-   - Test log streaming
-
-**⚠️ After completing backend tasks: run `pytest` and `ruff format backend/`, then proceed to frontend**
-
-### Frontend (Tasks 6-8)
-
-6. **TypeScript Types & API Client** (`frontend/src/`)
-   - Create `types/pipeline.ts` — Pipeline, Node, Edge types
-   - Create `api/pipelines.ts` — CRUD + run + logs API client
-   - Create `api/pipelineRuns.ts` — SSE log streaming client
-
-7. **Pipeline List Page** (`frontend/src/components/PipelinesPage.tsx`)
-   - List all pipelines
-   - Create new pipeline (name, description)
-   - Delete pipeline
-   - Navigate to editor
-
-8. **Pipeline Editor Page** (`frontend/src/components/PipelineEditor.tsx`)
-   - Use @xyflow/react for node-based editor
-   - Add nodes from sidebar (drag-and-drop or click-to-add)
-   - Connect nodes with edges
-   - Configure node parameters (form modal)
-   - Reference outputs from other nodes: `{{ node_id.output }}`
-   - Save pipeline
-   - Run pipeline and view real-time logs (SSE)
-
-## Requirements
-
-**Backend:**
-- Celery Integration — each node runs as isolated Celery task
-- Template Syntax — `{{ node_id.output_name }}` for referencing outputs
-- SSE for Logs — use `aiohttp-sse` or implement manually with `StreamingResponse`
-- Graph Validation — detect cycles, validate all connections exist
-
-**Frontend:**
-- @xyflow/react 12 for node editor
-- Mantine components for UI
-- Toast notifications for save/run results
-- Real-time log viewer with auto-scroll
-
-**Tests:**
-- Integration tests with testcontainers
-- Run `pytest` after backend implementation
-
-## Rules
-
-Follow all Development Rules in AI_CONTEXT.md:
-- Run `pytest` after backend implementation
-- Run `ruff format backend/` after writing code
-- Verify frontend changes with user before committing
-- Clean `__pycache__` before session end
-- Make git commit at session end
-- Do NOT start Session 5
-
-Start with Task 1 (Base Node Architecture).
+**Задание**
+В рамках этой сессии нужно:
+- Сделать отображение выходных параметров ноды и их типов в правой боковой панели отображения параметров ноды (NodeParamsFrom), также нужно, чтобы эти параметры точно также отображались в форме добавления ноды (NodeAddDialog)
+- При редактировании пайплайна в breadcrumbs должна отображаться не страница Update Pipeline, а Home -> Pipelines -> <pipeline_name> -> Update. Также нужно 
+поменять урл с /pipelines/new на /pipelines/<pipeline_name>/update
+- Создать страницу со списком запусков Pipeline'ов. На каждый параметр должна быть возможность перейти и посмотреть, какие ноды закончили выполнение: Не 
+запущенные должны быть белыми (как отображаются по дефолту), исполняющиеся должны быть желтыми, выполненные зелеными, а завершившиеся с ошибкой красными. Вцелом эта страница должна быть идентична странице редактирования пайплайна с той разницой, что в форме параметров пайплайна и форме параметров ноды не должно быть возможности изменить параметры (должны быть те, с которыми произошел запуск процесса). Также не должно быть возможности менять (перетаскивать, удалять ноды) в канвасе графа пайплайна.
+- При нажатии кнопки 'Run' должен генерироваться новый pipeline_run и должно перекидывать пользователя на страницу нового запуска (содержимое которой описано в предыдущем пункте).
+- Обновление состояний нод пока что не нужно делать в real-time через websockets. Достаточно сделать в разделе хедера (где breadcrumbs) кнопку 'Refresh', которая будет запрашивать актуальное состояние всех нод и отрисовывать граф
+- В конце также надо будет сделать функционал просмотра логов конкретной ноды. Его также пока не надо делать real-time. Лучше переделать бэк так, чтобы логгер писал логи в файл, а также добавить ручку, которая будет присылать содержимое логов на фронтенд. На самом фронтенде также можно будет сделать, чтобы эта ручка просто дергалась с определенным интервалом, например, раз в 5 секунд

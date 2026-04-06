@@ -11,6 +11,7 @@ import {
   Divider,
   Badge,
   Tooltip,
+  Code,
 } from '@mantine/core';
 import { IconInfoCircle } from '@tabler/icons-react';
 import { getConnections } from '../api/connections';
@@ -307,11 +308,27 @@ function FormField({
 }
 
 /**
+ * Get a human-readable type label from JSON schema type
+ */
+function getTypeLabelFromSchema(schemaType: string): string {
+  const typeMap: Record<string, string> = {
+    string: 'str',
+    integer: 'int',
+    number: 'float',
+    boolean: 'bool',
+    object: 'object',
+    array: 'list',
+  };
+  return typeMap[schemaType] || schemaType;
+}
+
+/**
  * Node Parameters Form component
  * Dynamically generates form UI from JSON Schema
  */
 export function NodeParamsForm({
   inputSchema,
+  outputSchema,
   config,
   onChange,
 }: {
@@ -319,6 +336,10 @@ export function NodeParamsForm({
     properties: Record<string, JsonSchemaProperty>;
     required?: string[];
     $defs?: Record<string, JsonSchemaProperty>;
+  } | null;
+  outputSchema?: {
+    properties: Record<string, JsonSchemaProperty>;
+    required?: string[];
   } | null;
   config: Record<string, unknown>;
   onChange: (updatedConfig: Record<string, unknown>) => void;
@@ -374,10 +395,11 @@ export function NodeParamsForm({
   return (
     <Box mt="md">
       <Stack gap="xs">
-        {Object.entries(properties).map(([fieldName, property]) => {
+        {Object.entries(properties).map(([fieldName, property], index, entries) => {
           const isRequired = requiredFields.has(fieldName);
           const currentValue =
             config[fieldName] !== undefined ? config[fieldName] : property.default;
+          const isLast = index === entries.length - 1;
 
           return (
             <Box key={fieldName}>
@@ -390,11 +412,38 @@ export function NodeParamsForm({
                 connections={connections}
                 defs={defs}
               />
-              <Divider mt="xs" />
+              {!isLast && <Divider mt="xs" />}
             </Box>
           );
         })}
       </Stack>
+
+      {/* Output variables */}
+      {outputSchema?.properties && Object.keys(outputSchema.properties).length > 0 && (
+        <Box mt="md">
+          <Divider mb="xs" label="Выходные переменные" labelPosition="center" />
+          <Stack gap={6}>
+            {Object.entries(outputSchema.properties).map(([paramName, propSchema]) => {
+              const schema = propSchema as Record<string, unknown>;
+              const typeLabel = getTypeLabelFromSchema((schema.type as string) || 'unknown');
+
+              return (
+                <Group key={paramName} gap="xs" wrap="nowrap">
+                  <Code>{paramName}</Code>
+                  <Text size="xs" c="dimmed">
+                    {typeLabel}
+                  </Text>
+                  {schema.description && (
+                    <Tooltip label={schema.description} withArrow>
+                      <IconInfoCircle size={14} style={{ cursor: 'pointer', color: '#868e96' }} />
+                    </Tooltip>
+                  )}
+                </Group>
+              );
+            })}
+          </Stack>
+        </Box>
+      )}
     </Box>
   );
 }

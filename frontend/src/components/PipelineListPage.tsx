@@ -126,16 +126,20 @@ export function PipelinesPage() {
 
   const handleEdit = useCallback(
     (pipelineId: string) => {
-      navigate(`/pipelines/new?id=${pipelineId}`);
+      navigate(`/pipelines/${pipelineId}/update`);
     },
     [navigate]
   );
 
   const handleRun = useCallback(
-    (pipelineId: string) => {
-      navigate(`/pipelines/${pipelineId}/run`);
+    (_pipelineId: string) => {
+      notifications.show({
+        title: 'Coming Soon',
+        message: 'Pipeline run viewer is under development',
+        color: 'yellow',
+      });
     },
-    [navigate]
+    []
   );
 
   const rows = pipelines.map((pipeline) => {

@@ -18,6 +18,8 @@
 
 7. **Build Frontend in Docker Only** — NEVER run `npm run build` or `npm install` locally. Always build the frontend inside Docker using `docker build -f frontend/Dockerfile frontend/` or `docker-compose build frontend`
 
+13. **Do Not Rebuild Frontend After Every Change** — Do NOT rebuild the frontend Docker image after every small change. Only build when the user explicitly requests it or when a significant batch of changes is ready for verification. Let the user trigger `docker-compose up -d --build frontend` themselves for quick iteration.
+
 8. **Clean Before Session End** — Before offering to end or continue a session, clean `__pycache__` directories: `find . -type d -name "__pycache__" -exec rm -rf {} +`
 
 9. **End of Session Protocol** — At the end of a session, make a git commit with all changes. Do not start tasks from the next session; instead, offer to complete or compact the current session

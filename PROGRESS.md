@@ -347,3 +347,43 @@ class TextOutputNode(BaseNode[TextOutputInput, TextOutputOutput]):
 - ~~Save/Load Pipeline~~ ✅ COMPLETED (Session 8)
 - Pipeline Run + SSE Log Viewer
 - Pipeline Parameters (left panel) — dynamic key-value editor
+
+---
+
+### Session 9 — Bug Fixes, Runs Page & Connection UUID Resolution ✅ COMPLETED
+
+**Goal:** Fix bugs from previous sessions, add Pipeline Runs page, fix connection UUID resolution in node configs.
+
+**Completed Files:**
+- ✅ `frontend/src/context/PipelineNameContext.tsx` — NEW: Context for sharing pipeline name between editor and breadcrumbs
+- ✅ `frontend/src/components/NodeParamsForm.tsx` — Fixed: no Divider after last parameter; added `i` icon with tooltip for output params description
+- ✅ `frontend/src/flows/PipelineEditor.tsx` — Fixed: Save stays on update page (no redirect); fixed `getNodeType` fetch on every character (extracted `selectedNodeType` state)
+- ✅ `frontend/src/App.tsx` — Fixed breadcrumbs using `pathname` regex extraction instead of `useParams()` (which doesn't work outside `<Routes>`); added `PipelineNameProvider`
+- ✅ `frontend/src/components/PipelineRunsPage.tsx` — NEW: Full run list page with table (Run ID, Pipeline, Status, Started, Duration, Error)
+- ✅ `frontend/src/api/pipelines.ts` — Added `getAllRuns()` for fetching all runs across pipelines
+- ✅ `backend/app/api/pipeline_runs.py` — Added `GET /api/v1/pipelines/runs` for listing all runs
+- ✅ `backend/app/main.py` — Registered `global_runs_router` before parameterized routes
+- ✅ `backend/app/orchestration/graph_resolver.py` — Rewrote `validate_node_params()`: only checks required fields present and connection UUID validity (full type validation deferred to runtime for Jinja2 compatibility)
+- ✅ `backend/app/orchestration/executor.py` — Rewrote `_resolve_connections()`: proper async DB lookup with `asyncio.run()`, resolves UUID strings to typed `BaseConnection` objects via `assemble_connection()`
+- ✅ `frontend/src/components/NodeParamsForm.tsx` — Added output params `i` icon with tooltip description
+
+**Bug Fixes:**
+- **Breadcrumbs "Loading..." forever**: `useParams()` returns `undefined` outside `<Routes>` → switched to `pathname` regex extraction
+- **Save redirects to list page**: Changed to stay on update page after save; new pipelines redirect to their update page
+- **`getNodeType` fetch on every character**: `useEffect` depended on `nodes` array → extracted `selectedNodeType` string state
+- **Postgres Query connection UUID rejected**: Validation now uses `TypeAdapter` for field-by-field checks; connection fields resolved at runtime in executor
+- **Jinja2 templates blocked type validation**: `validate_node_params()` now only checks required fields present + connection UUID validity; full type validation deferred to runtime after template resolution
+- **Divider after last parameter**: Added `isLast` check to skip Divider
+
+**Architecture Decisions:**
+- **Connection UUID resolution**: Frontend sends connection UUID string; backend resolves to typed `BaseConnection` in executor via DB lookup + `assemble_connection()`
+- **Deferred type validation**: Since node configs may contain Jinja2 templates (`{{ upstream.result }}`), full type validation is done at runtime after template resolution; save-time validation only checks required fields present + connection UUID format
+
+**Test Results:** 161 tests passing
+
+**Verified via MCP:**
+- Save with connection UUID → 200 ✅
+- Save with Jinja2 template → 200 ✅
+- Save without required connection → 400 "connection is required" ✅
+- Run pipeline with postgres_query + connection → 201 success ✅
+- Runs page displays all pipeline runs ✅

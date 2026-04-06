@@ -9,14 +9,99 @@ Supports real-time log streaming via multiprocessing.Queue.
 import asyncio
 import logging
 import multiprocessing as mp
+import os
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass
 from multiprocessing import Queue
 from typing import Any, AsyncGenerator, Optional
 
+from app.core.config import settings
 from app.orchestration.logger import create_streaming_logger
 
 logger = logging.getLogger(__name__)
+
+
+def _resolve_connections(
+    config: dict[str, Any],
+    node_type: str,
+) -> dict[str, Any]:
+    """Replace UUID connection references with full connection objects.
+
+    Looks up the node class to find which fields expect connections,
+    then fetches those connections from DB and assembles them.
+
+    Args:
+        config: Node config dict (may contain UUID strings for connection fields)
+        node_type: Node type string to look up input_schema
+
+    Returns:
+        Config dict with connection references resolved to typed objects
+    """
+    import asyncio
+    import uuid
+
+    from sqlalchemy import select
+    from sqlalchemy.ext.asyncio import create_async_engine
+
+    from app.core.config import settings
+    from app.models.connection import Connection
+    from app.nodes.registry import NodeRegistry
+    from app.schemas.connection import BaseConnection, assemble_connection
+
+    # Ensure registry is populated
+    if not NodeRegistry._registry:
+        NodeRegistry.scan_nodes()
+
+    if not NodeRegistry.is_registered(node_type):
+        return config  # Unknown node type, return as-is
+
+    node_class = NodeRegistry.get(node_type)
+    if not node_class.input_schema:
+        return config
+
+    # Find connection fields
+    connection_field_names = set()
+    for field_name, field_info in node_class.input_schema.model_fields.items():
+        try:
+            if issubclass(field_info.annotation, BaseConnection):
+                connection_field_names.add(field_name)
+        except TypeError:
+            pass
+
+    if not connection_field_names:
+        return config  # No connection fields
+
+    # Resolve connections from DB
+    async def _fetch_connection(conn_id: str):
+        engine = create_async_engine(settings.DATABASE_URL)
+        try:
+            async with engine.begin() as conn:
+                result = await conn.execute(
+                    select(Connection).where(Connection.id == conn_id)
+                )
+                return result.scalar_one_or_none()
+        finally:
+            await engine.dispose()
+
+    resolved = dict(config)
+    for field_name in connection_field_names:
+        value = config.get(field_name)
+        if not isinstance(value, str):
+            continue
+        try:
+            uuid.UUID(value)  # Validate UUID format
+        except ValueError:
+            continue  # Not a UUID, skip
+
+        db_conn = asyncio.run(_fetch_connection(value))
+        if db_conn:
+            resolved[field_name] = assemble_connection(
+                db_conn.connection_type.value,
+                db_conn.config,
+                db_conn.secrets,
+            )
+
+    return resolved
 
 
 @dataclass
@@ -60,11 +145,14 @@ def _execute_node_in_process(
     """
     from app.nodes.registry import NodeRegistry
 
-    # Create logger with queue handler if provided
-    py_logger: logging.Logger | None = None
-    if log_queue is not None:
+    # Setup file-based logging for this node
+    log_dir = os.path.join(settings.LOG_DIR, pipeline_run_id)
+    os.makedirs(log_dir, exist_ok=True)
+    log_file = os.path.join(log_dir, f"{node_id}.log")
 
-        def on_log(message: str) -> None:
+    # Create logger with both callback (for streaming) and file handler
+    def on_log(message: str) -> None:
+        if log_queue is not None:
             log_queue.put(
                 LogMessage(
                     pipeline_run_id=pipeline_run_id,
@@ -73,11 +161,11 @@ def _execute_node_in_process(
                     level="INFO",
                 )
             )
+        # Also write to file
+        with open(log_file, "a") as f:
+            f.write(message + "\n")
 
-        py_logger = create_streaming_logger(f"node.{node_id}", on_log)
-    else:
-        # Create standard logger for non-streaming execution
-        py_logger = logging.getLogger(f"node.{node_id}")
+    py_logger = create_streaming_logger(f"node.{node_id}", on_log)
 
     try:
         # Create node instance
@@ -96,6 +184,10 @@ def _execute_node_in_process(
             params=pipeline_params,
             upstream_outputs=upstream_outputs,
         )
+
+        # Resolve connection references: replace UUID strings with full connection objects
+        # TODO: Move to Scheduler when implemented
+        resolved_config = _resolve_connections(resolved_config, node_type)
 
         # Validate configuration against input_schema
         # TODO: Move to Scheduler when implemented

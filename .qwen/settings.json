@@ -9,6 +9,7 @@
       "command": "npx",
       "args": [
         "-y",
+        "--isolated",
         "chrome-devtools-mcp@latest"
       ]
     }
@@ -48,7 +49,8 @@
       "Bash(curl *)",
       "Bash(python3 *)",
       "Bash(docker compose up *)",
-      "Bash(docker compose restart *)"
+      "Bash(docker compose restart *)",
+      "Bash(../.venv/bin/python *)"
     ]
   },
   "$version": 3

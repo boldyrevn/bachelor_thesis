@@ -177,5 +177,5 @@ class NodeScanner:
                 version=1,
                 is_active=True,
             )
-            self.session.add(new_node_type)
+            self.session.adccccbgibjhkdiebrvnjbvtjeekbhfnbbielceeknrtghd(new_node_type)
             logger.debug(f"Created node type: {node_class.node_type}")

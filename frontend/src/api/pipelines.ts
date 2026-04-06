@@ -1,4 +1,34 @@
 import { api } from './client';
+import { RunStatus } from '../types/pipeline';
+
+/**
+ * Pipeline run response from API
+ */
+export interface PipelineRun {
+  id: string;
+  pipeline_id: string;
+  status: RunStatus;
+  parameters: Record<string, unknown>;
+  started_at: string | null;
+  completed_at: string | null;
+  error_message: string | null;
+  duration_seconds: number | null;
+}
+
+/**
+ * Node run response from API
+ */
+export interface NodeRun {
+  id: string;
+  pipeline_run_id: string;
+  node_id: string;
+  node_type: string;
+  status: RunStatus;
+  output_values: Record<string, unknown>;
+  started_at: string | null;
+  completed_at: string | null;
+  error_message: string | null;
+}
 
 /**
  * Pipeline graph node specification
@@ -134,5 +164,58 @@ export const runPipelineSync = async (
   const response = await api.post(`/api/v1/pipelines/${pipelineId}/run`, {
     params: params || {},
   });
+  return response.data;
+};
+
+/**
+ * Get all pipeline runs across all pipelines
+ */
+export const getAllRuns = async (
+  limit: number = 50,
+  offset: number = 0
+): Promise<{ runs: PipelineRun[]; total: number }> => {
+  const response = await api.get('/api/v1/pipelines/runs', {
+    params: { limit, offset },
+  });
+  return response.data;
+};
+
+/**
+ * List all runs for a pipeline
+ */
+export const getPipelineRuns = async (
+  pipelineId: string,
+  limit: number = 20,
+  offset: number = 0
+): Promise<{ runs: PipelineRun[]; total: number }> => {
+  const response = await api.get(`/api/v1/pipelines/${pipelineId}/runs`, {
+    params: { limit, offset },
+  });
+  return response.data;
+};
+
+/**
+ * Get a pipeline run detail with node runs
+ */
+export const getPipelineRunDetail = async (
+  runId: string
+): Promise<{
+  run: PipelineRun;
+  node_runs: NodeRun[];
+}> => {
+  const response = await api.get(`/api/v1/pipelines/runs/${runId}/detail`);
+  return response.data;
+};
+
+/**
+ * Get node run logs from file
+ */
+export const getNodeRunLogs = async (
+  runId: string,
+  nodeId: string
+): Promise<{ logs: string }> => {
+  const response = await api.get(
+    `/api/v1/pipelines/runs/${runId}/nodes/${nodeId}/logs`
+  );
   return response.data;
 };

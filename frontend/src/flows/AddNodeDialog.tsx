@@ -362,6 +362,39 @@ export function AddNodeDialog({ opened, onClose, onAdd, existingNodeIds }: AddNo
                   </Box>
                 )}
 
+                {/* Output parameters summary (read-only) */}
+                {Object.keys(selectedNodeType.output_schema.properties || {}).length > 0 && (
+                  <Box>
+                    <Text fw={600} size="sm" mb="xs">
+                      Выходные параметры
+                    </Text>
+                    <Stack gap={6}>
+                      {Object.entries(selectedNodeType.output_schema.properties).map(
+                        ([paramName, propSchema]) => {
+                          const schema = propSchema as Record<string, unknown>;
+                          const typeLabel = getTypeLabel(schema.type as string);
+                          const isRequired =
+                            selectedNodeType.output_schema.required?.includes(paramName);
+
+                          return (
+                            <Group key={paramName} gap="xs" wrap="nowrap">
+                              <Code>{paramName}</Code>
+                              <Text size="xs" c="dimmed">
+                                {typeLabel}
+                              </Text>
+                              {isRequired && (
+                                <Badge size="sm" color="green" variant="light">
+                                  output
+                                </Badge>
+                              )}
+                            </Group>
+                          );
+                        }
+                      )}
+                    </Stack>
+                  </Box>
+                )}
+
                 {/* Custom name input */}
                 <Box>
                   <Text fw={600} size="sm" mb="xs">

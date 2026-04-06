@@ -8,7 +8,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useSearchParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate } from 'react-router-dom';
 import {
   ReactFlow,
   ReactFlowProvider,
@@ -39,7 +39,7 @@ import {
   Modal,
 } from '@mantine/core';
 import { useForm } from '@mantine/form';
-import { IconPlus, IconCube, IconX, IconDeviceFloppy } from '@tabler/icons-react';
+import { IconPlus, IconCube, IconX, IconDeviceFloppy, IconPlayerPlay } from '@tabler/icons-react';
 import { notifications } from '@mantine/notifications';
 import { ResizeHandle } from './ResizeHandle';
 import { FlowNode } from './nodes/FlowNode';
@@ -58,7 +58,9 @@ import {
   type PipelineNode,
   type PipelineEdge,
 } from '../api/pipelines';
+import { api } from '../api/client';
 import { useRegisterHeaderAction } from '../context/HeaderActionsContext';
+import { usePipelineName } from '../context/PipelineNameContext';
 import type { CanvasNodeData, NodeType } from '../types/nodeType';
 
 const nodeTypes: NodeTypes = { flowNode: FlowNode };
@@ -68,6 +70,21 @@ const MIN_PANEL_WIDTH = 200;
 const MAX_PANEL_WIDTH = 600;
 const DEFAULT_LEFT_WIDTH = 260;
 const DEFAULT_RIGHT_WIDTH = 280;
+
+/**
+ * Get a human-readable type label from JSON schema type
+ */
+function getTypeLabelFromSchema(schemaType: string): string {
+  const typeMap: Record<string, string> = {
+    string: 'str',
+    integer: 'int',
+    number: 'float',
+    boolean: 'bool',
+    object: 'object',
+    array: 'list',
+  };
+  return typeMap[schemaType] || schemaType;
+}
 
 function PipelineEditorWithContext() {
   const { setDraggingFromNodeId } = useConnectionDrag();
@@ -81,10 +98,10 @@ function PipelineEditorWithContext() {
   const [rightWidth, setRightWidth] = useState(DEFAULT_RIGHT_WIDTH);
   const [dialogOpened, setDialogOpened] = useState(false);
   const [nodeTypeSchema, setNodeTypeSchema] = useState<NodeType | null>(null);
-  const [searchParams] = useSearchParams();
+  const { pipelineId: pipelineIdFromParams } = useParams<{ pipelineId: string }>();
+  const { setPipelineName } = usePipelineName();
   const navigate = useNavigate();
-  const pipelineIdFromUrl = searchParams.get('id');
-  const [pipelineId, setPipelineId] = useState<string | null>(pipelineIdFromUrl);
+  const [pipelineId, setPipelineId] = useState<string | null>(pipelineIdFromParams || null);
   const [isSaving, setIsSaving] = useState(false);
   const [conflictModal, setConflictModal] = useState<{
     open: boolean;
@@ -130,6 +147,7 @@ function PipelineEditorWithContext() {
 
         setNodes(rfNodes);
         setEdges(rfEdges);
+        setPipelineName(pipeline.name);
         saveForm.setValues({
           name: pipeline.name,
           description: pipeline.description || '',
@@ -181,6 +199,7 @@ function PipelineEditorWithContext() {
             description: values.description || undefined,
             graph_definition: graphDefinition,
           });
+          setPipelineName(values.name);
           notifications.show({
             title: 'Success',
             message: 'Pipeline updated successfully',
@@ -193,13 +212,16 @@ function PipelineEditorWithContext() {
             graph_definition: graphDefinition,
           });
           setPipelineId(response.id);
+          setPipelineName(values.name);
           notifications.show({
             title: 'Success',
             message: 'Pipeline created successfully',
             color: 'green',
           });
+          // Redirect to update page for new pipelines
+          navigate(`/pipelines/${response.id}/update`);
+          return;
         }
-        navigate('/pipelines');
       } catch (error: any) {
         const status = error?.response?.status;
         const detail = error?.response?.data?.detail;
@@ -249,7 +271,7 @@ function PipelineEditorWithContext() {
         setIsSaving(false);
       }
     },
-    [pipelineId, buildGraphDefinition, navigate]
+    [pipelineId, buildGraphDefinition]
   );
 
   // Save button for header
@@ -277,16 +299,80 @@ function PipelineEditorWithContext() {
 
   useRegisterHeaderAction(saveButton);
 
+  // Run button for header (only visible when editing existing pipeline)
+  const runButton = useMemo(() => {
+    if (!pipelineId) return null;
+    return (
+      <Button
+        key="pipeline-run"
+        leftSection={<IconPlayerPlay size={16} />}
+        size="sm"
+        color="green"
+        onClick={async () => {
+          try {
+            // Save first
+            const graphDefinition = buildGraphDefinition();
+            await updatePipeline(pipelineId, {
+              name: formValuesRef.current.name,
+              description: formValuesRef.current.description || undefined,
+              graph_definition: graphDefinition,
+            });
+
+            // Run pipeline
+            const response = await api.post(
+              `/api/v1/pipelines/${pipelineId}/run`,
+              { parameters: {} }
+            );
+            const runId = response.data.id;
+
+            notifications.show({
+              title: 'Run Complete',
+              message: 'Pipeline execution finished',
+              color: 'green',
+            });
+
+            navigate(`/pipelines/${pipelineId}/runs/${runId}`);
+          } catch (error: any) {
+            const detail = error?.response?.data?.detail;
+            notifications.show({
+              title: 'Run Failed',
+              message: String(detail || error?.message || 'Unknown error').substring(0, 200),
+              color: 'red',
+            });
+          }
+        }}
+      >
+        Run
+      </Button>
+    );
+  }, [pipelineId, buildGraphDefinition, navigate]);
+
+  // Combine save + run buttons into a single registration
+  // to avoid useRegisterHeaderAction(null) overwriting saveButton
+  const headerActions = useMemo(
+    () => runButton ? <Group>{saveButton}{runButton}</Group> : saveButton,
+    [saveButton, runButton]
+  );
+
+  useRegisterHeaderAction(headerActions);
+
+  const [selectedNodeType, setSelectedNodeType] = useState<string | null>(null);
+
   useEffect(() => {
     const selectedNode = nodes.find((n) => n.id === selectedNodeId);
-    if (!selectedNode) {
+    const nodeType = selectedNode?.data.nodeType || null;
+    setSelectedNodeType(nodeType);
+  }, [selectedNodeId, nodes]);
+
+  useEffect(() => {
+    if (!selectedNodeType) {
       setNodeTypeSchema(null);
       return;
     }
-    getNodeType(selectedNode.data.nodeType)
+    getNodeType(selectedNodeType)
       .then((schema) => setNodeTypeSchema(schema))
       .catch(() => setNodeTypeSchema(null));
-  }, [selectedNodeId, nodes]);
+  }, [selectedNodeType]);
 
   const updateNodeConfig = useCallback(
     (nodeId: string, newConfig: Record<string, unknown>) => {
@@ -534,7 +620,7 @@ function PipelineEditorWithContext() {
             }}
           >
             <Text fw={700} size="sm" c="dark">
-              {selectedNode ? 'Параметры Node' : 'Список узлов'}
+              {selectedNode ? 'Входные параметры Node' : 'Список узлов'}
             </Text>
           </Box>
 
@@ -562,6 +648,7 @@ function PipelineEditorWithContext() {
                   </Badge>
                   <NodeParamsForm
                     inputSchema={nodeTypeSchema?.input_schema || null}
+                    outputSchema={nodeTypeSchema?.output_schema || null}
                     config={selectedNode.data.config}
                     onChange={(updatedConfig) =>
                       updateNodeConfig(selectedNode.id, updatedConfig)

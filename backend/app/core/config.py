@@ -42,6 +42,9 @@ class Settings(BaseSettings):
     # Spark
     SPARK_MASTER: str = "spark://localhost:7077"
 
+    # Logging
+    LOG_DIR: str = "/tmp/flowforge_logs"
+
     @property
     def minio_url(self) -> str:
         """Get MinIO URL with scheme."""
