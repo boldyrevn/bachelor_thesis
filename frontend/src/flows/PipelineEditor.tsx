@@ -2,16 +2,19 @@
  * Pipeline Editor canvas with @xyflow/react
  * Visual node-based DAG editor with drag-and-drop
  *
- * Layout: [Pipeline Params] | [Canvas] | [Node List + Add Node button | Node Params]
+ * Layout: [Name Input]
+ *          [Pipeline Params] | [Canvas] | [Node List + Add Node button | Node Params]
  * All panels form a continuous space with resizable borders.
  */
 
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useSearchParams, useNavigate } from 'react-router-dom';
 import {
   ReactFlow,
   ReactFlowProvider,
   Controls,
   Background,
+  BackgroundVariant,
   addEdge,
   useNodesState,
   useEdgesState,
@@ -21,7 +24,7 @@ import {
   type Edge,
   type NodeTypes,
   type EdgeTypes,
-  type OnConnectStartParams,
+  type OnConnectStart,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import {
@@ -32,8 +35,12 @@ import {
   ActionIcon,
   Badge,
   ScrollArea,
+  TextInput,
+  Modal,
 } from '@mantine/core';
-import { IconPlus, IconCube, IconX } from '@tabler/icons-react';
+import { useForm } from '@mantine/form';
+import { IconPlus, IconCube, IconX, IconDeviceFloppy } from '@tabler/icons-react';
+import { notifications } from '@mantine/notifications';
 import { ResizeHandle } from './ResizeHandle';
 import { FlowNode } from './nodes/FlowNode';
 import { FlowEdge } from './edges/FlowEdge';
@@ -42,98 +49,291 @@ import {
   useConnectionDrag,
 } from './ConnectionDragContext';
 import { AddNodeDialog } from './AddNodeDialog';
-import type { CanvasNodeData } from '../types/nodeType';
+import { NodeParamsForm } from '../components/NodeParamsForm';
+import { getNodeType } from '../api/nodeTypes';
+import {
+  createPipeline,
+  updatePipeline,
+  getPipeline,
+  type PipelineNode,
+  type PipelineEdge,
+} from '../api/pipelines';
+import { useRegisterHeaderAction } from '../context/HeaderActionsContext';
+import type { CanvasNodeData, NodeType } from '../types/nodeType';
 
-/**
- * Register custom node and edge types
- */
-const nodeTypes: NodeTypes = {
-  flowNode: FlowNode,
-};
-
-const edgeTypes: EdgeTypes = {
-  flowEdge: FlowEdge,
-};
+const nodeTypes: NodeTypes = { flowNode: FlowNode };
+const edgeTypes: EdgeTypes = { flowEdge: FlowEdge };
 
 const MIN_PANEL_WIDTH = 200;
 const MAX_PANEL_WIDTH = 600;
 const DEFAULT_LEFT_WIDTH = 260;
 const DEFAULT_RIGHT_WIDTH = 280;
 
-/**
- * Inner editor component that uses the connection drag context
- */
 function PipelineEditorWithContext() {
-  const { draggingFromNodeId, setDraggingFromNodeId } = useConnectionDrag();
-  const [nodes, setNodes, onNodesChange] = useNodesState<Node<CanvasNodeData>[]>([]);
-  const [edges, setEdges, onEdgesChange] = useEdgesState<Edge[]>([]);
+  const { setDraggingFromNodeId } = useConnectionDrag();
+  const [nodes, setNodes, onNodesChange] = useNodesState<Node<CanvasNodeData>>([]);
+  const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
+  // Ref for latest graph state (avoids stale closures in save)
+  const graphRef = useRef({ nodes: [] as Node<CanvasNodeData>[], edges: [] as Edge[] });
+  graphRef.current = { nodes, edges };
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [leftWidth, setLeftWidth] = useState(DEFAULT_LEFT_WIDTH);
   const [rightWidth, setRightWidth] = useState(DEFAULT_RIGHT_WIDTH);
   const [dialogOpened, setDialogOpened] = useState(false);
-  const { screenToFlowPosition } = useReactFlow();
+  const [nodeTypeSchema, setNodeTypeSchema] = useState<NodeType | null>(null);
+  const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
+  const pipelineIdFromUrl = searchParams.get('id');
+  const [pipelineId, setPipelineId] = useState<string | null>(pipelineIdFromUrl);
+  const [isSaving, setIsSaving] = useState(false);
+  const [conflictModal, setConflictModal] = useState<{
+    open: boolean;
+    values: { name: string; description: string };
+  }>({ open: false, values: { name: '', description: '' } });
+  const { screenToFlowPosition, setCenter } = useReactFlow();
 
-  /**
-   * Add a node from the dialog with custom name
-   */
+  const saveForm = useForm({
+    initialValues: { name: '', description: '' },
+    validate: { name: (value) => (!value.trim() ? 'Name is required' : null) },
+  });
+  // Ref for latest form values (avoids stale closures in save button)
+  const formValuesRef = useRef(saveForm.values);
+  formValuesRef.current = saveForm.values;
+
+  // Load existing pipeline if pipelineId is present
+  useEffect(() => {
+    if (!pipelineId) return;
+
+    getPipeline(pipelineId)
+      .then((pipeline) => {
+        const { graph_definition } = pipeline;
+
+        const rfNodes: Node<CanvasNodeData>[] = (graph_definition.nodes || []).map((n) => ({
+          id: n.id,
+          type: 'flowNode',
+          position: { x: n.position.x ?? 0, y: n.position.y ?? 0 },
+          data: {
+            label: (n.data.label as string) || n.id,
+            nodeType: n.type,
+            config: (n.data.config as Record<string, unknown>) || n.data,
+          },
+        }));
+
+        const rfEdges: Edge[] = (graph_definition.edges || []).map((e) => ({
+          id: e.id,
+          source: e.source,
+          target: e.target,
+          sourceHandle: e.source_handle,
+          targetHandle: e.target_handle,
+          type: 'flowEdge',
+        }));
+
+        setNodes(rfNodes);
+        setEdges(rfEdges);
+        saveForm.setValues({
+          name: pipeline.name,
+          description: pipeline.description || '',
+        });
+      })
+      .catch((err) => {
+        console.error('Failed to load pipeline:', err);
+        notifications.show({
+          title: 'Error',
+          message: 'Failed to load pipeline',
+          color: 'red',
+        });
+      });
+  }, [pipelineId]);
+
+  const buildGraphDefinition = useCallback(() => {
+    const { nodes: currentNodes, edges: currentEdges } = graphRef.current;
+    const graphNodes: PipelineNode[] = currentNodes.map((node) => ({
+      id: node.id,
+      type: node.data.nodeType,
+      position: { x: node.position.x, y: node.position.y },
+      data: {
+        label: node.data.label,
+        nodeType: node.data.nodeType,
+        config: node.data.config,
+      } as Record<string, unknown>,
+    }));
+
+    const graphEdges: PipelineEdge[] = currentEdges.map((edge) => ({
+      id: edge.id,
+      source: edge.source,
+      target: edge.target,
+      source_handle: edge.sourceHandle ?? undefined,
+      target_handle: edge.targetHandle ?? undefined,
+    }));
+
+    return { nodes: graphNodes, edges: graphEdges };
+  }, []);
+
+  const doSave = useCallback(
+    async (values: { name: string; description: string }) => {
+      setIsSaving(true);
+      try {
+        const graphDefinition = buildGraphDefinition();
+
+        if (pipelineId) {
+          await updatePipeline(pipelineId, {
+            name: values.name,
+            description: values.description || undefined,
+            graph_definition: graphDefinition,
+          });
+          notifications.show({
+            title: 'Success',
+            message: 'Pipeline updated successfully',
+            color: 'green',
+          });
+        } else {
+          const response = await createPipeline({
+            name: values.name,
+            description: values.description || undefined,
+            graph_definition: graphDefinition,
+          });
+          setPipelineId(response.id);
+          notifications.show({
+            title: 'Success',
+            message: 'Pipeline created successfully',
+            color: 'green',
+          });
+        }
+        navigate('/pipelines');
+      } catch (error: any) {
+        const status = error?.response?.status;
+        const detail = error?.response?.data?.detail;
+
+        if (status === 422) {
+          // Pydantic validation errors — show user-friendly messages
+          if (Array.isArray(detail)) {
+            const messages = detail.map((e: any) => {
+              const field = e.loc?.join('.') || 'field';
+              const msg = e.msg || 'invalid';
+              return `${field}: ${msg}`;
+            });
+            notifications.show({
+              title: 'Validation Error',
+              message: messages.join('; '),
+              color: 'red',
+            });
+          } else {
+            notifications.show({
+              title: 'Validation Error',
+              message: String(detail || 'Invalid input'),
+              color: 'red',
+            });
+          }
+        } else if (status === 409 || status === 400) {
+          const cleanDetail = String(detail || '').replace(/\n\s*/g, ' ').substring(0, 200);
+          if (
+            cleanDetail.toLowerCase().includes('already exists') ||
+            cleanDetail.toLowerCase().includes('unique')
+          ) {
+            setConflictModal({ open: true, values });
+          } else {
+            notifications.show({
+              title: 'Validation Error',
+              message: cleanDetail || 'Invalid pipeline configuration',
+              color: 'red',
+            });
+          }
+        } else {
+          notifications.show({
+            title: 'Error',
+            message: String(detail || error?.message || 'Failed to save pipeline').substring(0, 200),
+            color: 'red',
+          });
+        }
+      } finally {
+        setIsSaving(false);
+      }
+    },
+    [pipelineId, buildGraphDefinition, navigate]
+  );
+
+  // Save button for header
+  const saveButton = useMemo(
+    () => (
+      <Button
+        key="pipeline-save"
+        leftSection={<IconDeviceFloppy size={16} />}
+        size="sm"
+        onClick={() => {
+          // Validate form manually
+          saveForm.validate();
+          if (Object.keys(saveForm.errors).length > 0) {
+            return;
+          }
+          doSave(formValuesRef.current);
+        }}
+        loading={isSaving}
+      >
+        Save
+      </Button>
+    ),
+    [isSaving, doSave]
+  );
+
+  useRegisterHeaderAction(saveButton);
+
+  useEffect(() => {
+    const selectedNode = nodes.find((n) => n.id === selectedNodeId);
+    if (!selectedNode) {
+      setNodeTypeSchema(null);
+      return;
+    }
+    getNodeType(selectedNode.data.nodeType)
+      .then((schema) => setNodeTypeSchema(schema))
+      .catch(() => setNodeTypeSchema(null));
+  }, [selectedNodeId, nodes]);
+
+  const updateNodeConfig = useCallback(
+    (nodeId: string, newConfig: Record<string, unknown>) => {
+      setNodes((nds) =>
+        nds.map((node) =>
+          node.id === nodeId
+            ? { ...node, data: { ...node.data, config: newConfig } }
+            : node
+        )
+      );
+    },
+    [setNodes]
+  );
+
   const handleAddNode = useCallback(
     (nodeType: string, customName: string, config: Record<string, unknown>) => {
       const position = screenToFlowPosition({
         x: window.innerWidth / 2,
         y: window.innerHeight / 2,
       });
-
       const newNode: Node<CanvasNodeData> = {
-        id: `node-${Date.now()}`,
+        id: customName,
         type: 'flowNode',
         position,
-        data: {
-          label: customName,
-          nodeType,
-          config,
-        },
+        data: { label: customName, nodeType, config },
       };
-
       setNodes((nds) => nds.concat(newNode));
     },
     [screenToFlowPosition, setNodes]
   );
 
-  /**
-   * Handle connection start — track which node we're dragging from
-   */
-  const onConnectStart = useCallback(
-    (_: React.MouseEvent | React.TouchEvent, params: OnConnectStartParams) => {
-      if (params.nodeId) {
-        setDraggingFromNodeId(params.nodeId);
-      }
+  const onConnectStart: OnConnectStart = useCallback(
+    (_event, params) => {
+      if (params.nodeId) setDraggingFromNodeId(params.nodeId);
     },
     [setDraggingFromNodeId]
   );
 
-  /**
-   * Handle connection end — clear the drag state
-   */
   const onConnectEnd = useCallback(() => {
     setDraggingFromNodeId(null);
   }, [setDraggingFromNodeId]);
 
-  /**
-   * Handle connection — only allow bottom (source) to top (target)
-   */
   const onConnect: OnConnect = useCallback(
     (connection) => {
       const { source, target, sourceHandle, targetHandle } = connection;
-
-      // 1. Prevent self-loops
       if (source === target) return;
-
-      // 2. Enforce direction: Source must be 'source-bottom', Target must be 'target-top'
-      if (sourceHandle !== 'source-bottom' || targetHandle !== 'target-top') {
-        return;
-      }
-
-      // 3. Prevent duplicate edges
+      if (sourceHandle !== 'source-bottom' || targetHandle !== 'target-top') return;
       const exists = edges.some(
         (e) =>
           e.source === source &&
@@ -142,50 +342,60 @@ function PipelineEditorWithContext() {
           e.targetHandle === targetHandle
       );
       if (exists) return;
-
       setEdges((eds) =>
-        addEdge(
-          {
-            ...connection,
-            type: 'flowEdge',
-            selected: false,
-          },
-          eds
-        )
+        addEdge({ ...connection, type: 'flowEdge', selected: false }, eds)
       );
     },
     [setEdges, edges]
   );
 
   /**
-   * Handle node click — select the node
+   * Select a node — update state + center view on the node + highlight on canvas
    */
-  const onNodeClick = useCallback(
-    (_: React.MouseEvent, node: Node) => {
-      setSelectedNodeId(node.id);
+  const selectNode = useCallback(
+    (nodeId: string | null) => {
+      setSelectedNodeId(nodeId);
+      // Update node selection state for React Flow visual highlighting
+      setNodes((nds) =>
+        nds.map((n) => ({
+          ...n,
+          selected: n.id === nodeId,
+        }))
+      );
+      if (nodeId) {
+        const node = nodes.find((n) => n.id === nodeId);
+        if (node) {
+          const width = node.measured?.width || 200;
+          const height = node.measured?.height || 100;
+          setCenter(
+            node.position.x + width / 2,
+            node.position.y + height / 2,
+            { zoom: 1, duration: 300 }
+          );
+        }
+      }
     },
-    []
+    [nodes, setNodes, setCenter]
   );
 
-  /**
-   * Handle pane click — deselect node
-   */
-  const onPaneClick = useCallback(() => {
-    setSelectedNodeId(null);
-  }, []);
+  const onNodeClick = useCallback(
+    (_: React.MouseEvent, node: Node) => {
+      selectNode(node.id);
+    },
+    [selectNode]
+  );
 
-  /**
-   * Remove a node from the list
-   */
+  const onPaneClick = useCallback(() => {
+    selectNode(null);
+  }, [selectNode]);
+
   const removeNode = useCallback(
     (nodeId: string) => {
       setNodes((nds) => nds.filter((n) => n.id !== nodeId));
       setEdges((eds) =>
         eds.filter((e) => e.source !== nodeId && e.target !== nodeId)
       );
-      if (selectedNodeId === nodeId) {
-        setSelectedNodeId(null);
-      }
+      if (selectedNodeId === nodeId) setSelectedNodeId(null);
     },
     [selectedNodeId, setNodes, setEdges]
   );
@@ -193,13 +403,7 @@ function PipelineEditorWithContext() {
   const selectedNode = nodes.find((n) => n.id === selectedNodeId);
 
   return (
-    <Box
-      style={{
-        display: 'flex',
-        height: '100%',
-        width: '100%',
-      }}
-    >
+    <Box style={{ display: 'flex', height: '100%' }}>
       {/* Left panel: Pipeline Parameters */}
       <Box
         style={{
@@ -222,14 +426,19 @@ function PipelineEditorWithContext() {
             Параметры Pipeline
           </Text>
         </Box>
-        <Box p="md" style={{ flex: 1 }}>
-          <Text c="dimmed" size="sm">
-            Глобальные параметры пайплайна будут здесь.
-          </Text>
+        <Box p="sm" style={{ borderBottom: '1px solid #eee' }}>
+          <TextInput
+            label="Name"
+            placeholder="my-pipeline"
+            required
+            {...saveForm.getInputProps('name')}
+            error={saveForm.errors.name}
+            size="sm"
+          />
         </Box>
+        <Box p="md" style={{ flex: 1 }} />
       </Box>
 
-      {/* Resize handle: left | canvas */}
       <ResizeHandle
         currentWidth={leftWidth}
         onResize={setLeftWidth}
@@ -238,191 +447,233 @@ function PipelineEditorWithContext() {
         direction="right"
       />
 
-      {/* Center: Canvas */}
-      <Box style={{ flex: 1, position: 'relative', minWidth: 300 }}>
-        <ReactFlow
-          nodes={nodes}
-          edges={edges}
-          onNodesChange={onNodesChange}
-          onEdgesChange={onEdgesChange}
-          onConnect={onConnect}
-          onConnectStart={onConnectStart}
-          onConnectEnd={onConnectEnd}
-          onNodeClick={onNodeClick}
-          onPaneClick={onPaneClick}
-          nodeTypes={nodeTypes}
-          edgeTypes={edgeTypes}
-          fitView
-        >
-          <Controls />
-          <Background variant="dots" gap={16} size={1} color="#adb5bd" />
-          <svg style={{ position: 'absolute', top: 0, left: 0, width: 0, height: 0 }}>
-            <defs>
-              <marker
-                id="arrow-default"
-                viewBox="0 0 10 10"
-                refX="5"
-                refY="5"
-                markerWidth="6"
-                markerHeight="6"
-                orient="auto"
-              >
-                <path d="M 0 0 L 10 5 L 0 10 z" fill="#d0d5db" />
-              </marker>
-              <marker
-                id="arrow-selected"
-                viewBox="0 0 10 10"
-                refX="5"
-                refY="5"
-                markerWidth="6"
-                markerHeight="6"
-                orient="auto"
-              >
-                <path d="M 0 0 L 10 5 L 0 10 z" fill="#495057" />
-              </marker>
-            </defs>
-          </svg>
-        </ReactFlow>
-      </Box>
-
-      {/* Resize handle: canvas | right */}
-      <ResizeHandle
-        currentWidth={rightWidth}
-        onResize={setRightWidth}
-        minWidth={MIN_PANEL_WIDTH}
-        maxWidth={MAX_PANEL_WIDTH}
-        direction="left"
-      />
-
-      {/* Right panel: Node List / Node Params */}
-      <Box
-        style={{
-          width: rightWidth,
-          minWidth: rightWidth,
-          backgroundColor: '#ffffff',
-          borderLeft: '1px solid #dee2e6',
-          display: 'flex',
-          flexDirection: 'column',
-        }}
-      >
-        <Box
-          p="sm"
-          style={{
-            borderBottom: '1px solid #dee2e6',
-            backgroundColor: '#f1f3f5',
-          }}
-        >
-          <Text fw={700} size="sm" c="dark">
-            {selectedNode ? 'Параметры Node' : 'Список узлов'}
-          </Text>
+        {/* Center: Canvas */}
+        <Box style={{ flex: 1, position: 'relative', minWidth: 300 }}>
+          <ReactFlow
+            nodes={nodes}
+            edges={edges}
+            onNodesChange={onNodesChange}
+            onEdgesChange={onEdgesChange}
+            onConnect={onConnect}
+            onConnectStart={onConnectStart}
+            onConnectEnd={onConnectEnd}
+            onNodeClick={onNodeClick}
+            onPaneClick={onPaneClick}
+            nodeTypes={nodeTypes}
+            edgeTypes={edgeTypes}
+            fitView
+          >
+            <Controls />
+            <Background
+              variant={BackgroundVariant.Dots}
+              gap={16}
+              size={1}
+              color="#adb5bd"
+            />
+            <svg
+              style={{
+                position: 'absolute',
+                top: 0,
+                left: 0,
+                width: 0,
+                height: 0,
+              }}
+            >
+              <defs>
+                <marker
+                  id="arrow-default"
+                  viewBox="0 0 10 10"
+                  refX="5"
+                  refY="5"
+                  markerWidth="6"
+                  markerHeight="6"
+                  orient="auto"
+                >
+                  <path d="M 0 0 L 10 5 L 0 10 z" fill="#d0d5db" />
+                </marker>
+                <marker
+                  id="arrow-selected"
+                  viewBox="0 0 10 10"
+                  refX="5"
+                  refY="5"
+                  markerWidth="6"
+                  markerHeight="6"
+                  orient="auto"
+                >
+                  <path d="M 0 0 L 10 5 L 0 10 z" fill="#495047" />
+                </marker>
+              </defs>
+            </svg>
+          </ReactFlow>
         </Box>
 
-        <ScrollArea style={{ flex: 1 }}>
-          <Box p="sm">
-            {selectedNode ? (
-              /* Selected node params */
-              <Box>
-                <Group justify="space-between" wrap="nowrap" mb="xs">
-                  <Box style={{ minWidth: 0, flex: 1 }}>
-                    <Text fw={600} size="sm" lineClamp={2}>
-                      {selectedNode.data.label}
-                    </Text>
-                  </Box>
-                  <ActionIcon
-                    variant="subtle"
-                    size="sm"
-                    onClick={() => setSelectedNodeId(null)}
-                    style={{ flexShrink: 0 }}
-                  >
-                    <IconX size={14} />
-                  </ActionIcon>
-                </Group>
-                <Badge size="sm" variant="light">
-                  {selectedNode.data.nodeType}
-                </Badge>
-                <Box mt="md">
-                  <Text c="dimmed" size="xs">
-                    Параметры ноды будут здесь.
-                  </Text>
-                </Box>
-              </Box>
-            ) : nodes.length > 0 ? (
-              /* Node list */
-              <Box style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                {nodes.map((node) => (
-                  <Box
-                    key={node.id}
-                    p="xs"
-                    style={{
-                      cursor: 'pointer',
-                      display: 'flex',
-                      justifyContent: 'space-between',
-                      alignItems: 'center',
-                      borderRadius: 4,
-                      border: '1px solid #dee2e6',
-                    }}
-                    onClick={() => setSelectedNodeId(node.id)}
-                  >
-                    <Box style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0, flex: 1 }}>
-                      <IconCube size={16} style={{ flexShrink: 0 }} />
-                      <Text size="sm" lineClamp={2}>{node.data.label}</Text>
+        <ResizeHandle
+          currentWidth={rightWidth}
+          onResize={setRightWidth}
+          minWidth={MIN_PANEL_WIDTH}
+          maxWidth={MAX_PANEL_WIDTH}
+          direction="left"
+        />
+
+        {/* Right panel: Node List / Node Params */}
+        <Box
+          style={{
+            width: rightWidth,
+            minWidth: rightWidth,
+            backgroundColor: '#ffffff',
+            borderLeft: '1px solid #dee2e6',
+            display: 'flex',
+            flexDirection: 'column',
+          }}
+        >
+          <Box
+            p="sm"
+            style={{
+              borderBottom: '1px solid #dee2e6',
+              backgroundColor: '#f1f3f5',
+            }}
+          >
+            <Text fw={700} size="sm" c="dark">
+              {selectedNode ? 'Параметры Node' : 'Список узлов'}
+            </Text>
+          </Box>
+
+          <ScrollArea style={{ flex: 1 }}>
+            <Box p="sm">
+              {selectedNode ? (
+                <Box>
+                  <Group justify="space-between" wrap="nowrap" mb="xs">
+                    <Box style={{ minWidth: 0, flex: 1 }}>
+                      <Text fw={600} size="sm" lineClamp={2}>
+                        {selectedNode.data.label}
+                      </Text>
                     </Box>
                     <ActionIcon
                       variant="subtle"
                       size="sm"
-                      color="red"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        removeNode(node.id);
-                      }}
+                      onClick={() => selectNode(null)}
                       style={{ flexShrink: 0 }}
                     >
                       <IconX size={14} />
                     </ActionIcon>
-                  </Box>
-                ))}
-              </Box>
-            ) : (
-              <Text c="dimmed" size="sm">
-                Нет узлов. Добавьте узел через кнопку ниже.
-              </Text>
-            )}
-          </Box>
-        </ScrollArea>
+                  </Group>
+                  <Badge size="sm" variant="light">
+                    {selectedNode.data.nodeType}
+                  </Badge>
+                  <NodeParamsForm
+                    inputSchema={nodeTypeSchema?.input_schema || null}
+                    config={selectedNode.data.config}
+                    onChange={(updatedConfig) =>
+                      updateNodeConfig(selectedNode.id, updatedConfig)
+                    }
+                  />
+                </Box>
+              ) : nodes.length > 0 ? (
+                <Box style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  {nodes.map((node) => (
+                    <Box
+                      key={node.id}
+                      p="xs"
+                      style={{
+                        cursor: 'pointer',
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        borderRadius: 4,
+                        border: '1px solid #dee2e6',
+                      }}
+                      onClick={() => selectNode(node.id)}
+                    >
+                      <Box
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 8,
+                          minWidth: 0,
+                          flex: 1,
+                        }}
+                      >
+                        <IconCube size={16} style={{ flexShrink: 0 }} />
+                        <Text size="sm" lineClamp={2}>
+                          {node.data.label}
+                        </Text>
+                      </Box>
+                      <ActionIcon
+                        variant="subtle"
+                        size="sm"
+                        color="red"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          removeNode(node.id);
+                        }}
+                        style={{ flexShrink: 0 }}
+                      >
+                        <IconX size={14} />
+                      </ActionIcon>
+                    </Box>
+                  ))}
+                </Box>
+              ) : (
+                <Text c="dimmed" size="sm">
+                  Нет узлов. Добавьте узел через кнопку ниже.
+                </Text>
+              )}
+            </Box>
+          </ScrollArea>
 
-        {/* Add Node button at the bottom of the right panel */}
-        <Box
-          p="sm"
-          style={{
-            borderTop: '1px solid #dee2e6',
-            backgroundColor: '#f8f9fa',
-          }}
-        >
-          <Button
-            leftSection={<IconPlus size={16} />}
-            size="sm"
-            variant="filled"
-            fullWidth
-            onClick={() => setDialogOpened(true)}
+          <Box
+            p="sm"
+            style={{
+              borderTop: '1px solid #dee2e6',
+              backgroundColor: '#f8f9fa',
+            }}
           >
-            Добавить Node
-          </Button>
+            <Button
+              leftSection={<IconPlus size={16} />}
+              size="sm"
+              variant="filled"
+              fullWidth
+              onClick={() => setDialogOpened(true)}
+            >
+              Добавить Node
+            </Button>
+          </Box>
         </Box>
-      </Box>
 
-      {/* Add Node Dialog */}
-      <AddNodeDialog
-        opened={dialogOpened}
-        onClose={() => setDialogOpened(false)}
-        onAdd={handleAddNode}
-      />
+        {/* Add Node Dialog */}
+        <AddNodeDialog
+          opened={dialogOpened}
+          onClose={() => setDialogOpened(false)}
+          onAdd={handleAddNode}
+          existingNodeIds={new Set(nodes.map((n) => n.id))}
+        />
+
+        {/* Name Conflict Modal */}
+        <Modal
+          opened={conflictModal.open}
+          onClose={() => setConflictModal({ open: false, values: { name: '', description: '' } })}
+          title="Name Conflict"
+          centered
+        >
+          <Text size="sm" mb="md">
+            A pipeline with the name <b>"{conflictModal.values.name}"</b> already
+            exists. Please choose a different name.
+          </Text>
+          <Group justify="flex-end">
+            <Button
+              variant="default"
+              onClick={() =>
+                setConflictModal({ open: false, values: { name: '', description: '' } })
+              }
+            >
+              OK
+            </Button>
+          </Group>
+        </Modal>
     </Box>
   );
 }
 
-/**
- * Pipeline Editor component (provides ReactFlow context + ConnectionDrag context)
- */
 export function PipelineEditor() {
   return (
     <ReactFlowProvider>

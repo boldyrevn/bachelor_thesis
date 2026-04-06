@@ -2,12 +2,20 @@
 
 import pytest
 
+from app.core.template_resolver import resolve_template, resolve_dict_values
+from app.nodes.registry import NodeRegistry
 from app.orchestration.pipeline_executor import (
     PipelineExecutionContext,
-    PipelineExecutor,
     PipelineExecutionResult,
+    PipelineExecutor,
     execute_pipeline,
 )
+
+
+@pytest.fixture(autouse=True)
+def scan_nodes():
+    """Ensure node registry is populated before each test."""
+    NodeRegistry.scan_nodes()
 
 
 class TestPipelineExecutionContext:
@@ -67,103 +75,83 @@ class TestPipelineExecutionResult:
         assert result.error == "Something went wrong"
 
 
-class TestPipelineExecutorTemplateResolution:
-    """Tests for template resolution in PipelineExecutor."""
+class TestJinja2TemplateResolution:
+    """Tests for Jinja2 template resolution via template_resolver."""
 
     def test_resolve_node_output_template(self):
         """Test resolving {{ node_id.output_name }} template."""
-        executor = PipelineExecutor({"nodes": [], "edges": []})
-        context = PipelineExecutionContext(
-            pipeline_id="p1",
-            pipeline_run_id="r1",
-            node_outputs={"node-a": {"text": "Hello from A"}},
+        upstream_outputs = {"node_a": {"text": "Hello from A"}}
+        result = resolve_template(
+            "Message: {{ node_a.text }}",
+            upstream_outputs=upstream_outputs,
         )
-
-        result = executor._resolve_string_templates(
-            "Message: {{ node-a.text }}", context
-        )
-
         assert result == "Message: Hello from A"
 
     def test_resolve_params_template(self):
         """Test resolving {{ params.param_name }} template."""
-        executor = PipelineExecutor({"nodes": [], "edges": []})
-        context = PipelineExecutionContext(
-            pipeline_id="p1",
-            pipeline_run_id="r1",
-            pipeline_params={"date": "2024-01-15", "env": "prod"},
+        params = {"date": "2024-01-15", "env": "prod"}
+        result = resolve_template(
+            "Date: {{ params.date }}, Env: {{ params.env }}",
+            params=params,
         )
-
-        result = executor._resolve_string_templates(
-            "Date: {{ params.date }}, Env: {{ params.env }}", context
-        )
-
         assert result == "Date: 2024-01-15, Env: prod"
 
     def test_resolve_mixed_templates(self):
         """Test resolving mixed node and params templates."""
-        executor = PipelineExecutor({"nodes": [], "edges": []})
-        context = PipelineExecutionContext(
-            pipeline_id="p1",
-            pipeline_run_id="r1",
-            pipeline_params={"suffix": "World"},
-            node_outputs={"greeting": {"text": "Hello"}},
+        params = {"suffix": "World"}
+        upstream_outputs = {"greeting": {"text": "Hello"}}
+        result = resolve_template(
+            "{{ greeting.text }}, {{ params.suffix }}!",
+            params=params,
+            upstream_outputs=upstream_outputs,
         )
-
-        result = executor._resolve_string_templates(
-            "{{ greeting.text }}, {{ params.suffix }}!", context
-        )
-
         assert result == "Hello, World!"
 
-    def test_resolve_unresolved_template_kept(self):
-        """Test that unresolved templates are kept as-is."""
-        executor = PipelineExecutor({"nodes": [], "edges": []})
-        context = PipelineExecutionContext(
-            pipeline_id="p1",
-            pipeline_run_id="r1",
+    def test_resolve_unresolved_template_error(self):
+        """Test that unresolved templates return error marker (Jinja2 Undefined raises error)."""
+        result = resolve_template(
+            "Value: {{ nonexistent.text }}",
+            upstream_outputs={},
         )
+        assert "TEMPLATE_ERROR" in result
+        assert "nonexistent" in result
 
-        result = executor._resolve_string_templates(
-            "Value: {{ nonexistent.output }}", context
+    def test_resolve_jinja2_filter(self):
+        """Test resolving template with Jinja2 filter."""
+        params = {"name": "hello"}
+        result = resolve_template(
+            "{{ params.name | upper }}",
+            params=params,
         )
+        assert result == "HELLO"
 
-        assert result == "Value: {{ nonexistent.output }}"
+    def test_resolve_jinja2_conditional(self):
+        """Test resolving template with Jinja2 conditional."""
+        params = {"env": "prod"}
+        result = resolve_template(
+            "{% if params.env == 'prod' %}Production{% else %}Dev{% endif %}",
+            params=params,
+        )
+        assert result == "Production"
 
     def test_resolve_nested_dict(self):
         """Test resolving templates in nested dictionary."""
-        executor = PipelineExecutor({"nodes": [], "edges": []})
-        context = PipelineExecutionContext(
-            pipeline_id="p1",
-            pipeline_run_id="r1",
-            node_outputs={"node-a": {"path": "s3://bucket/file"}},
-        )
-
+        upstream_outputs = {"node_a": {"path": "s3://bucket/file"}}
         node_data = {
             "config": {
-                "input_path": "{{ node-a.path }}",
-                "nested": {"output": "{{ node-a.path }}/output"},
+                "input_path": "{{ node_a.path }}",
+                "nested": {"output": "{{ node_a.path }}/output"},
             }
         }
-
-        result = executor._resolve_templates(node_data, context)
-
+        result = resolve_dict_values(node_data, upstream_outputs=upstream_outputs)
         assert result["config"]["input_path"] == "s3://bucket/file"
         assert result["config"]["nested"]["output"] == "s3://bucket/file/output"
 
     def test_resolve_list_with_templates(self):
         """Test resolving templates in list."""
-        executor = PipelineExecutor({"nodes": [], "edges": []})
-        context = PipelineExecutionContext(
-            pipeline_id="p1",
-            pipeline_run_id="r1",
-            node_outputs={"node-a": {"value": "A"}, "node-b": {"value": "B"}},
-        )
-
-        node_data = {"items": ["{{ node-a.value }}", "{{ node-b.value }}"]}
-
-        result = executor._resolve_templates(node_data, context)
-
+        upstream_outputs = {"node_a": {"value": "A"}, "node_b": {"value": "B"}}
+        node_data = {"items": ["{{ node_a.value }}", "{{ node_b.value }}"]}
+        result = resolve_dict_values(node_data, upstream_outputs=upstream_outputs)
         assert result["items"] == ["A", "B"]
 
 
@@ -233,9 +221,12 @@ class TestPipelineExecutorExecution:
         graph = {
             "nodes": [
                 {
-                    "id": "node-1",
+                    "id": "node_1",
                     "type": "text_output",
-                    "data": {"message": "Hello from pipeline!"},
+                    "data": {
+                        "type": "text_output",
+                        "config": {"message": "Hello from pipeline!"},
+                    },
                 }
             ],
             "edges": [],
@@ -248,9 +239,9 @@ class TestPipelineExecutorExecution:
         )
 
         assert result.success is True
-        assert "node-1" in result.node_results
+        assert "node_1" in result.node_results
         assert (
-            result.node_results["node-1"]["outputs"]["text"] == "Hello from pipeline!"
+            result.node_results["node_1"]["outputs"]["text"] == "Hello from pipeline!"
         )
 
         await executor.close()
@@ -261,18 +252,24 @@ class TestPipelineExecutorExecution:
         graph = {
             "nodes": [
                 {
-                    "id": "node-1",
+                    "id": "node_1",
                     "type": "text_output",
-                    "data": {"message": "First node"},
+                    "data": {
+                        "type": "text_output",
+                        "config": {"message": "First node"},
+                    },
                 },
                 {
-                    "id": "node-2",
+                    "id": "node_2",
                     "type": "text_output",
-                    "data": {"message": "Second node"},
+                    "data": {
+                        "type": "text_output",
+                        "config": {"message": "Second node"},
+                    },
                 },
             ],
             "edges": [
-                {"id": "e1", "source": "node-1", "target": "node-2"},
+                {"id": "e1", "source": "node_1", "target": "node_2"},
             ],
         }
 
@@ -283,8 +280,8 @@ class TestPipelineExecutorExecution:
         )
 
         assert result.success is True
-        assert "node-1" in result.node_results
-        assert "node-2" in result.node_results
+        assert "node_1" in result.node_results
+        assert "node_2" in result.node_results
 
         await executor.close()
 
@@ -294,18 +291,24 @@ class TestPipelineExecutorExecution:
         graph = {
             "nodes": [
                 {
-                    "id": "node-1",
+                    "id": "node_1",
                     "type": "text_output",
-                    "data": {"message": "Hello from upstream!"},
+                    "data": {
+                        "type": "text_output",
+                        "config": {"message": "Hello from upstream!"},
+                    },
                 },
                 {
-                    "id": "node-2",
+                    "id": "node_2",
                     "type": "text_output",
-                    "data": {"message": "Received: {{ node-1.text }}"},
+                    "data": {
+                        "type": "text_output",
+                        "config": {"message": "Received: {{ node_1.text }}"},
+                    },
                 },
             ],
             "edges": [
-                {"id": "e1", "source": "node-1", "target": "node-2"},
+                {"id": "e1", "source": "node_1", "target": "node_2"},
             ],
         }
 
@@ -317,10 +320,10 @@ class TestPipelineExecutorExecution:
 
         assert result.success is True
         assert (
-            result.node_results["node-1"]["outputs"]["text"] == "Hello from upstream!"
+            result.node_results["node_1"]["outputs"]["text"] == "Hello from upstream!"
         )
         assert (
-            result.node_results["node-2"]["outputs"]["text"]
+            result.node_results["node_2"]["outputs"]["text"]
             == "Received: Hello from upstream!"
         )
 
@@ -331,12 +334,20 @@ class TestPipelineExecutorExecution:
         """Test that pipeline with cycle fails gracefully."""
         graph = {
             "nodes": [
-                {"id": "node-1", "type": "text_output", "data": {}},
-                {"id": "node-2", "type": "text_output", "data": {}},
+                {
+                    "id": "node_1",
+                    "type": "text_output",
+                    "data": {"type": "text_output", "config": {}},
+                },
+                {
+                    "id": "node_2",
+                    "type": "text_output",
+                    "data": {"type": "text_output", "config": {}},
+                },
             ],
             "edges": [
-                {"id": "e1", "source": "node-1", "target": "node-2"},
-                {"id": "e2", "source": "node-2", "target": "node-1"},
+                {"id": "e1", "source": "node_1", "target": "node_2"},
+                {"id": "e2", "source": "node_2", "target": "node_1"},
             ],
         }
 
@@ -358,9 +369,12 @@ class TestPipelineExecutorExecution:
         graph = {
             "nodes": [
                 {
-                    "id": "node-1",
+                    "id": "node_1",
                     "type": "text_output",
-                    "data": {"message": "Streaming test"},
+                    "data": {
+                        "type": "text_output",
+                        "config": {"message": "Streaming test"},
+                    },
                 }
             ],
             "edges": [],
@@ -395,9 +409,12 @@ class TestConvenienceFunctions:
         graph = {
             "nodes": [
                 {
-                    "id": "node-1",
+                    "id": "node_1",
                     "type": "text_output",
-                    "data": {"message": "Convenience test"},
+                    "data": {
+                        "type": "text_output",
+                        "config": {"message": "Convenience test"},
+                    },
                 }
             ],
             "edges": [],
@@ -410,4 +427,4 @@ class TestConvenienceFunctions:
         )
 
         assert result.success is True
-        assert result.node_results["node-1"]["outputs"]["text"] == "Convenience test"
+        assert result.node_results["node_1"]["outputs"]["text"] == "Convenience test"

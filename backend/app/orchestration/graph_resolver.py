@@ -3,8 +3,11 @@
 Provides topological sort and cycle detection for pipeline graphs.
 """
 
+import logging
 from dataclasses import dataclass, field
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -221,6 +224,10 @@ def validate_pipeline_graph(
 ) -> tuple[bool, str | None]:
     """Validate a pipeline graph definition.
 
+    Validates:
+    1. Graph structure (cycles, missing nodes)
+    2. Node parameters against node schemas
+
     Args:
         graph_definition: React Flow graph state
 
@@ -233,7 +240,57 @@ def validate_pipeline_graph(
     if resolved.has_cycle:
         return False, resolved.error_message
 
+    # Validate node parameters
+    param_errors = validate_node_params(graph_definition)
+    if param_errors:
+        return False, param_errors
+
     return True, None
+
+
+def validate_node_params(graph_definition: dict[str, Any]) -> str | None:
+    """Validate node config against node input schemas.
+
+    Args:
+        graph_definition: React Flow graph state
+
+    Returns:
+        Error message string or None if valid
+    """
+    from app.nodes.registry import NodeRegistry
+
+    # Ensure registry is populated (scan if empty)
+    if not NodeRegistry._registry:
+        NodeRegistry.scan_nodes()
+
+    nodes_raw = graph_definition.get("nodes", [])
+    errors = []
+
+    for node_data in nodes_raw:
+        node_id = node_data.get("id", "unknown")
+        node_type = node_data.get("type", "")
+
+        if not node_type or node_type == "PipelineParams":
+            continue
+
+        if not NodeRegistry.is_registered(node_type):
+            errors.append(f"Node '{node_id}': unknown node type '{node_type}'")
+            continue
+
+        node_class = NodeRegistry.get(node_type)
+        if not node_class.input_schema:
+            continue
+
+        config = node_data.get("data", {}).get("config", {})
+
+        try:
+            node_class.input_schema.model_validate(config)
+        except Exception as e:
+            errors.append(f"Node '{node_id}' ({node_type}): {e}")
+
+    if errors:
+        return "Validation errors:\n" + "\n".join(f"  - {e}" for e in errors)
+    return None
 
 
 def get_execution_order(graph_definition: dict[str, Any]) -> list[str]:

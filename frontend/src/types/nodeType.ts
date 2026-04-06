@@ -52,4 +52,5 @@ export interface CanvasNodeData {
   label: string; // User-defined or default title
   nodeType: string; // node_type identifier (e.g., 'text_output')
   config: Record<string, unknown>; // User-configured input values
+  [key: string]: unknown; // Index signature for React Flow compatibility
 }

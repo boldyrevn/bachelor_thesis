@@ -81,6 +81,10 @@ def _execute_node_in_process(
 
     try:
         # Create node instance
+        # Scan nodes in case registry is empty (fresh subprocess)
+        if not NodeRegistry.list_types():
+            NodeRegistry.scan_nodes()
+
         node = NodeRegistry.create(node_type)
 
         # Resolve Jinja2 templates in node_config

@@ -216,6 +216,9 @@ class PipelineExecutor:
     ) -> AsyncGenerator[tuple[list[LogMessage], dict[str, Any] | None], None]:
         """Execute a single node.
 
+        Template resolution is handled by _execute_node_in_process() via Jinja2.
+        This method passes raw node config + upstream_outputs to the executor.
+
         Args:
             node_id: Node to execute
             resolved: Resolved graph
@@ -227,13 +230,16 @@ class PipelineExecutor:
         node = resolved.nodes[node_id]
         node_data = node.data
 
-        # Get node type
+        # Extract node type from graph data (React Flow stores as "type")
+        # or fallback from GraphNode.node_type
         node_type = node_data.get("type", node.node_type)
 
-        # Resolve templates in node config
-        resolved_config = self._resolve_templates(node_data, context)
+        # Extract config from node_data
+        # Frontend stores config under "config" key: {"type": "text_output", "config": {"message": "..."}}
+        # But direct API calls may pass flat config: {"message": "..."}
+        node_config = node_data.get("config", node_data)
 
-        # Get upstream outputs for context
+        # Build upstream_outputs from already-executed nodes
         upstream_outputs = self._get_upstream_outputs(node, context)
 
         # Prepare pipeline params with context
@@ -244,10 +250,10 @@ class PipelineExecutor:
             "_node_id": node_id,
         }
 
-        # Execute node with streaming
+        # Execute node with streaming — Jinja2 template resolution happens inside
         async for logs, result in self.node_executor.execute_node_with_streaming(
             node_type=node_type,
-            node_config=resolved_config,
+            node_config=node_config,
             pipeline_params=pipeline_params,
             upstream_outputs=upstream_outputs,
             pipeline_run_id=context.pipeline_run_id,
@@ -279,78 +285,6 @@ class PipelineExecutor:
             if dep_id in context.node_outputs:
                 upstream[dep_id] = context.node_outputs[dep_id]
         return upstream
-
-    def _resolve_templates(
-        self,
-        node_data: dict[str, Any],
-        context: PipelineExecutionContext,
-    ) -> dict[str, Any]:
-        """Resolve templates in node configuration.
-
-        Replaces {{ node_id.output_name }} and {{ params.name }}
-        with actual values.
-
-        Args:
-            node_data: Node data dictionary (may be nested)
-            context: Execution context
-
-        Returns:
-            Node data with templates resolved
-        """
-        import json
-
-        def resolve_value(value: Any) -> Any:
-            if isinstance(value, str):
-                return self._resolve_string_templates(value, context)
-            elif isinstance(value, dict):
-                return {k: resolve_value(v) for k, v in value.items()}
-            elif isinstance(value, list):
-                return [resolve_value(item) for item in value]
-            else:
-                return value
-
-        return resolve_value(node_data)
-
-    def _resolve_string_templates(
-        self,
-        template: str,
-        context: PipelineExecutionContext,
-    ) -> str:
-        """Resolve templates in a string.
-
-        Supports:
-        - {{ node_id.output_name }} - node output reference
-        - {{ params.param_name }} - pipeline parameter reference
-
-        Args:
-            template: String with potential templates
-            context: Execution context
-
-        Returns:
-            String with templates resolved
-        """
-        import re
-
-        def replace_ref(match: re.Match) -> str:
-            ref = match.group(1).strip()
-
-            # Check for params reference
-            if ref.startswith("params."):
-                param_name = ref[7:]  # Remove "params." prefix
-                return str(context.pipeline_params.get(param_name, match.group(0)))
-
-            # Check for node output reference
-            parts = ref.split(".", 1)
-            if len(parts) == 2:
-                node_id, output_name = parts
-                output_value = context.node_outputs.get(node_id, {}).get(output_name)
-                if output_value is not None:
-                    return str(output_value)
-
-            # No match - keep original
-            return match.group(0)
-
-        return re.sub(r"\{\{\s*(.+?)\s*\}\}", replace_ref, template)
 
     async def close(self) -> None:
         """Cleanup executor resources."""

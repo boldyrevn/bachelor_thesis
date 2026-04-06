@@ -36,19 +36,44 @@ interface AddNodeDialogProps {
   opened: boolean;
   onClose: () => void;
   onAdd: (nodeType: string, customName: string, config: Record<string, unknown>) => void;
+  existingNodeIds: Set<string>;
+}
+
+/**
+ * Valid node name pattern: letters, digits, underscores only.
+ * Must start with a letter or underscore.
+ * Used in Jinja2 templates as {{ node_id.output_name }}.
+ */
+const NODE_NAME_REGEX = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
+
+/**
+ * Validate a node name and return an error message if invalid
+ */
+function validateNodeName(name: string, existingNodeIds: Set<string>): string | null {
+  if (!name || name.trim().length === 0) {
+    return 'Name is required';
+  }
+  if (!NODE_NAME_REGEX.test(name)) {
+    return 'Only English letters, digits, and underscores allowed. Must start with a letter or underscore.';
+  }
+  if (existingNodeIds.has(name.trim())) {
+    return `Node with name "${name.trim()}" already exists. Names must be unique.`;
+  }
+  return null;
 }
 
 /**
  * Get a human-readable type label from JSON schema type
+ * Uses Python-style type names: str, int, float, bool
  */
 function getTypeLabel(schemaType: string): string {
   const typeMap: Record<string, string> = {
-    string: 'string',
-    integer: 'number',
-    number: 'number',
-    boolean: 'boolean',
+    string: 'str',
+    integer: 'int',
+    number: 'float',
+    boolean: 'bool',
     object: 'object',
-    array: 'array',
+    array: 'list',
   };
   return typeMap[schemaType] || schemaType;
 }
@@ -93,6 +118,7 @@ function isMultilineString(propSchema: Record<string, unknown>): boolean {
 
 /**
  * Build a human-readable type label including connection type info
+ * Uses Python-style type names: str, int, float, bool
  */
 function buildTypeLabel(
   propSchema: Record<string, unknown>,
@@ -100,23 +126,28 @@ function buildTypeLabel(
 ): string {
   const connType = isConnectionType(propSchema, rootSchema);
   if (connType) {
-    const titles: Record<string, string> = {
-      postgres: 'PostgreSQL Connection',
-      clickhouse: 'ClickHouse Connection',
-      s3: 'S3 Connection',
-      spark: 'Spark Connection',
-    };
-    return titles[connType] || `${connType} Connection`;
+    // Return the actual class name from $defs if available
+    const allOf = propSchema.allOf as Record<string, unknown>[] | undefined;
+    if (allOf?.length) {
+      for (const item of allOf) {
+        const ref = item.$ref as string | undefined;
+        if (ref?.startsWith('#/$defs/')) {
+          const defName = ref.replace('#/$defs/', '');
+          return defName; // e.g., "PostgresConnection"
+        }
+      }
+    }
+    return `${connType} Connection`;
   }
 
   if (isMultilineString(propSchema)) {
-    return 'text (multiline)';
+    return 'str (multiline)';
   }
 
   return getTypeLabel(propSchema.type as string);
 }
 
-export function AddNodeDialog({ opened, onClose, onAdd }: AddNodeDialogProps) {
+export function AddNodeDialog({ opened, onClose, onAdd, existingNodeIds }: AddNodeDialogProps) {
   const [nodeTypes, setNodeTypes] = useState<NodeType[]>([]);
   const [selectedNodeType, setSelectedNodeType] = useState<NodeType | null>(null);
   const [customName, setCustomName] = useState('');
@@ -174,11 +205,36 @@ export function AddNodeDialog({ opened, onClose, onAdd }: AddNodeDialogProps) {
   const handleAdd = useCallback(() => {
     if (!selectedNodeType) return;
 
-    const displayName = customName.trim() || selectedNodeType.title;
+    let displayName: string;
+
+    if (customName.trim()) {
+      // Custom name provided — validate it
+      const error = validateNodeName(customName.trim());
+      if (error) return; // Don't add if validation fails
+      displayName = customName.trim();
+    } else {
+      // No custom name — generate unique name based on node_type with index
+      const baseName = selectedNodeType.node_type;
+      
+      if (!existingNodeIds.has(baseName)) {
+        // Base name is free, use it
+        displayName = baseName;
+      } else {
+        // Find next available index: baseName_1, baseName_2, ...
+        let index = 1;
+        while (existingNodeIds.has(`${baseName}_${index}`)) {
+          index++;
+        }
+        displayName = `${baseName}_${index}`;
+      }
+    }
+
     onAdd(selectedNodeType.node_type, displayName, {});
     setCustomName('');
     onClose();
-  }, [selectedNodeType, customName, onAdd, onClose]);
+  }, [selectedNodeType, customName, onAdd, onClose, existingNodeIds]);
+
+  const nameError = customName ? validateNodeName(customName.trim(), existingNodeIds) : null;
 
   return (
     <Modal
@@ -312,10 +368,15 @@ export function AddNodeDialog({ opened, onClose, onAdd }: AddNodeDialogProps) {
                     Название Node
                   </Text>
                   <TextInput
-                    placeholder={selectedNodeType.title}
+                    placeholder={selectedNodeType.node_type}
                     value={customName}
                     onChange={(e) => setCustomName(e.currentTarget.value)}
-                    description="Если не указано, будет использовано название по умолчанию"
+                    error={nameError}
+                    description={
+                      nameError
+                        ? nameError
+                        : 'English letters, digits, underscores only. Used in templates as {{ node_name.output }}'
+                    }
                   />
                 </Box>
               </>
@@ -326,7 +387,10 @@ export function AddNodeDialog({ opened, onClose, onAdd }: AddNodeDialogProps) {
               <Button variant="default" onClick={onClose}>
                 Отмена
               </Button>
-              <Button onClick={handleAdd} disabled={!selectedNodeType}>
+              <Button
+                onClick={handleAdd}
+                disabled={!selectedNodeType || (customName.trim() ? !!nameError : false)}
+              >
                 Добавить
               </Button>
             </Group>

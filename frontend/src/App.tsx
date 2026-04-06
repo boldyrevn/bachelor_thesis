@@ -21,8 +21,9 @@ import {
   IconChevronsRight,
 } from '@tabler/icons-react';
 import { ConnectionsPage } from './components/ConnectionsPage';
-import { PipelinesPage } from './components/PipelinesPage';
+import { PipelinesPage } from './components/PipelineListPage';
 import { PipelineEditor } from './flows/PipelineEditor';
+import { HeaderActionsProvider, useHeaderActions } from './context/HeaderActionsContext';
 
 /**
  * Breadcrumb items for each route
@@ -286,6 +287,7 @@ function AppContent() {
               )
             )}
           </Breadcrumbs>
+          <HeaderActionsSlot />
         </Group>
       </AppShell.Header>
 
@@ -319,10 +321,20 @@ function AppContent() {
   );
 }
 
+/**
+ * Renders header action buttons registered by child pages
+ */
+function HeaderActionsSlot() {
+  const { actions } = useHeaderActions();
+  return <Group>{actions}</Group>;
+}
+
 function App() {
   return (
     <BrowserRouter>
-      <AppContent />
+      <HeaderActionsProvider>
+        <AppContent />
+      </HeaderActionsProvider>
     </BrowserRouter>
   );
 }

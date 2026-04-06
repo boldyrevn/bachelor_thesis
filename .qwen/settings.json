@@ -35,7 +35,20 @@
       "mcp__chrome-devtools__take_snapshot",
       "mcp__chrome-devtools__click",
       "mcp__chrome-devtools__evaluate_script",
-      "mcp__chrome-devtools__press_key"
+      "mcp__chrome-devtools__press_key",
+      "Bash(.venv/bin/python *)",
+      "Bash(true)",
+      "Bash(docker logs *)",
+      "Bash(docker exec *)",
+      "Bash(/users/nikita.boldyrev/code/bachelor_thesis/.venv/bin/python3 *)",
+      "Bash(npx *)",
+      "mcp__chrome-devtools__fill",
+      "mcp__chrome-devtools__get_network_request",
+      "Bash(sleep *)",
+      "Bash(curl *)",
+      "Bash(python3 *)",
+      "Bash(docker compose up *)",
+      "Bash(docker compose restart *)"
     ]
   },
   "$version": 3

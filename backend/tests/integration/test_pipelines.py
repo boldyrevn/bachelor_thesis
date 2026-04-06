@@ -293,17 +293,23 @@ class TestPipelineRun:
             "graph_definition": {
                 "nodes": [
                     {
-                        "id": "node-1",
+                        "id": "node_1",
                         "type": "text_output",
-                        "data": {"message": "First"},
+                        "data": {
+                            "type": "text_output",
+                            "config": {"message": "First"},
+                        },
                     },
                     {
-                        "id": "node-2",
+                        "id": "node_2",
                         "type": "text_output",
-                        "data": {"message": "{{ node-1.text }} + Second"},
+                        "data": {
+                            "type": "text_output",
+                            "config": {"message": "{{ node_1.text }} + Second"},
+                        },
                     },
                 ],
-                "edges": [{"id": "e1", "source": "node-1", "target": "node-2"}],
+                "edges": [{"id": "e1", "source": "node_1", "target": "node_2"}],
             },
         }
         create_response = await client.post("/api/v1/pipelines", json=payload)
@@ -330,11 +336,11 @@ class TestPipelineRun:
         # Verify result
         result = result_events[0]
         assert result["success"] is True
-        assert "node-1" in result["node_results"]
-        assert "node-2" in result["node_results"]
+        assert "node_1" in result["node_results"]
+        assert "node_2" in result["node_results"]
 
         # Verify template resolution worked
-        assert result["node_results"]["node-2"]["outputs"]["text"] == "First + Second"
+        assert result["node_results"]["node_2"]["outputs"]["text"] == "First + Second"
 
     @pytest.mark.asyncio
     async def test_run_pipeline_stream_log_details(
