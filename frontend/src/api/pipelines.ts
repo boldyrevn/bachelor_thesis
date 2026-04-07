@@ -2,35 +2,6 @@ import { api } from './client';
 import { RunStatus } from '../types/pipeline';
 
 /**
- * Pipeline run response from API
- */
-export interface PipelineRun {
-  id: string;
-  pipeline_id: string;
-  status: RunStatus;
-  parameters: Record<string, unknown>;
-  started_at: string | null;
-  completed_at: string | null;
-  error_message: string | null;
-  duration_seconds: number | null;
-}
-
-/**
- * Node run response from API
- */
-export interface NodeRun {
-  id: string;
-  pipeline_run_id: string;
-  node_id: string;
-  node_type: string;
-  status: RunStatus;
-  output_values: Record<string, unknown>;
-  started_at: string | null;
-  completed_at: string | null;
-  error_message: string | null;
-}
-
-/**
  * Pipeline graph node specification
  */
 export interface PipelineNode {
@@ -60,6 +31,37 @@ export interface PipelineGraph {
 }
 
 /**
+ * Pipeline version response from backend
+ */
+export interface PipelineVersion {
+  id: string;
+  pipeline_id: string;
+  version: number;
+  name: string;
+  description: string | null;
+  graph_definition: {
+    nodes: PipelineNode[];
+    edges: PipelineEdge[];
+  };
+  is_current: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+/**
+ * Pipeline list item (summary of latest version)
+ */
+export interface PipelineListItem {
+  pipeline_id: string;
+  name: string;
+  description: string | null;
+  latest_version: number;
+  is_current_id: string;
+  created_at: string;
+  updated_at: string;
+}
+
+/**
  * Pipeline creation request
  */
 export interface PipelineCreateRequest {
@@ -84,67 +86,94 @@ export interface PipelineUpdateRequest {
 }
 
 /**
- * Pipeline response from backend
+ * Pipeline run response from API
  */
-export interface PipelineResponse {
+export interface PipelineRun {
   id: string;
-  name: string;
-  description: string | null;
-  graph_definition: {
-    nodes: PipelineNode[];
-    edges: PipelineEdge[];
-  };
-  created_at: string;
-  updated_at: string;
+  version_id: string;
+  status: RunStatus;
+  parameters: Record<string, unknown>;
+  started_at: string | null;
+  completed_at: string | null;
+  error_message: string | null;
+  duration_seconds: number | null;
 }
 
 /**
- * Pipeline list response
+ * Node run response from API
  */
-export interface PipelineListResponse {
-  pipelines: PipelineResponse[];
-  total: number;
+export interface NodeRun {
+  id: string;
+  pipeline_run_id: string;
+  node_id: string;
+  node_type: string;
+  status: RunStatus;
+  output_values: Record<string, unknown>;
+  started_at: string | null;
+  completed_at: string | null;
+  error_message: string | null;
 }
 
 /**
- * Fetch all pipelines
+ * Fetch all pipelines (returns list of latest versions)
  */
-export const getPipelines = async (): Promise<PipelineListResponse> => {
-  const response = await api.get<PipelineListResponse>('/api/v1/pipelines');
+export const getPipelines = async (): Promise<PipelineListItem[]> => {
+  const response = await api.get<PipelineListItem[]>('/api/v1/pipelines');
   return response.data;
 };
 
 /**
- * Fetch a single pipeline by ID
+ * Fetch a single pipeline (latest version) by ID
  */
-export const getPipeline = async (pipelineId: string): Promise<PipelineResponse> => {
-  const response = await api.get<PipelineResponse>(`/api/v1/pipelines/${pipelineId}`);
+export const getPipeline = async (pipelineId: string): Promise<PipelineVersion> => {
+  const response = await api.get<PipelineVersion>(`/api/v1/pipelines/${pipelineId}`);
   return response.data;
 };
 
 /**
- * Create a new pipeline
+ * Fetch all versions of a pipeline
+ */
+export const getPipelineVersions = async (pipelineId: string): Promise<PipelineVersion[]> => {
+  const response = await api.get<PipelineVersion[]>(`/api/v1/pipelines/${pipelineId}/versions`);
+  return response.data;
+};
+
+/**
+ * Fetch a specific version of a pipeline
+ */
+export const getPipelineVersion = async (
+  pipelineId: string,
+  versionId: string
+): Promise<PipelineVersion> => {
+  const response = await api.get<PipelineVersion>(
+    `/api/v1/pipelines/${pipelineId}/versions/${versionId}`
+  );
+  return response.data;
+};
+
+/**
+ * Create a new pipeline (version 1)
  */
 export const createPipeline = async (
   data: PipelineCreateRequest
-): Promise<PipelineResponse> => {
-  const response = await api.post<PipelineResponse>('/api/v1/pipelines', data);
+): Promise<PipelineVersion> => {
+  const response = await api.post<PipelineVersion>('/api/v1/pipelines', data);
   return response.data;
 };
 
 /**
- * Update an existing pipeline
+ * Update an existing pipeline (creates new version)
  */
 export const updatePipeline = async (
   pipelineId: string,
   data: PipelineUpdateRequest
-): Promise<PipelineResponse> => {
-  const response = await api.put<PipelineResponse>(`/api/v1/pipelines/${pipelineId}`, data);
+): Promise<PipelineVersion> => {
+  const response = await api.put<PipelineVersion>(`/api/v1/pipelines/${pipelineId}`, data);
   return response.data;
 };
 
 /**
- * Delete a pipeline
+ * Delete a pipeline and all its versions
  */
 export const deletePipeline = async (pipelineId: string): Promise<void> => {
   await api.delete(`/api/v1/pipelines/${pipelineId}`);
@@ -181,7 +210,7 @@ export const getAllRuns = async (
 };
 
 /**
- * List all runs for a pipeline
+ * List all runs for a pipeline (across all versions)
  */
 export const getPipelineRuns = async (
   pipelineId: string,

@@ -22,8 +22,7 @@ import {
   IconLoader2,
   IconAlertCircle,
 } from '@tabler/icons-react';
-import { getAllRuns, type PipelineRun } from '../api/pipelines';
-import { getPipelines, type PipelineResponse } from '../api/pipelines';
+import { getAllRuns, getPipelines, type PipelineRun, type PipelineListItem } from '../api/pipelines';
 
 const STATUS_COLORS: Record<string, string> = {
   completed: 'green',
@@ -74,7 +73,7 @@ function formatDate(dateStr: string | null): string {
 
 export function PipelineRunsPage() {
   const [runs, setRuns] = useState<PipelineRun[]>([]);
-  const [pipelines, setPipelines] = useState<Record<string, PipelineResponse>>({});
+  const [pipelines, setPipelines] = useState<Record<string, PipelineListItem>>({});
   const [loading, setLoading] = useState(true);
 
   const loadData = useCallback(() => {
@@ -82,11 +81,10 @@ export function PipelineRunsPage() {
     Promise.all([getAllRuns(), getPipelines()])
       .then(([runsData, pipelinesData]) => {
         setRuns(runsData.runs);
-        const pipelineMap: Record<string, PipelineResponse> = {};
-        // getPipelines returns {pipelines: [], total: number} but backend returns array directly
-        const pipelinesList = Array.isArray(pipelinesData) ? pipelinesData : (pipelinesData as any).pipelines || [];
-        pipelinesList.forEach((p: PipelineResponse) => {
-          pipelineMap[p.id] = p;
+        const pipelineMap: Record<string, PipelineListItem> = {};
+        const pipelinesList = Array.isArray(pipelinesData) ? pipelinesData : [];
+        pipelinesList.forEach((p: PipelineListItem) => {
+          pipelineMap[p.pipeline_id] = p;
         });
         setPipelines(pipelineMap);
       })
@@ -122,28 +120,34 @@ export function PipelineRunsPage() {
   }
 
   const rows = runs.map((run) => {
-    const pipeline = pipelines[run.pipeline_id];
-    const pipelineName = pipeline?.name || run.pipeline_id.slice(0, 8);
+    // Resolve pipeline_id from version_id via lookup table or fallback
+    const pipelineId = (run as any).pipeline_id;
+    const pipeline = pipelineId ? pipelines[pipelineId] : null;
+    const pipelineName = pipeline?.name || (pipelineId?.slice(0, 8) || run.version_id.slice(0, 8));
 
     return (
       <Table.Tr key={run.id}>
         <Table.Td>
           <Anchor
             component={Link}
-            to={`/pipelines/${run.pipeline_id}/runs/${run.id}`}
+            to={pipelineId ? `/pipelines/${pipelineId}/runs/${run.id}` : '#'}
             underline="never"
           >
             {run.id.slice(0, 8)}...
           </Anchor>
         </Table.Td>
         <Table.Td>
-          <Anchor
-            component={Link}
-            to={`/pipelines/${run.pipeline_id}/update`}
-            underline="never"
-          >
-            {pipelineName}
-          </Anchor>
+          {pipelineId ? (
+            <Anchor
+              component={Link}
+              to={`/pipelines/${pipelineId}/update`}
+              underline="never"
+            >
+              {pipelineName}
+            </Anchor>
+          ) : (
+            <Text size="sm" c="dimmed">{pipelineName}</Text>
+          )}
         </Table.Td>
         <Table.Td>
           <StatusBadge status={run.status} />

@@ -9,7 +9,6 @@ from pydantic import BaseModel, ConfigDict, Field, GetJsonSchemaHandler, field_v
 from pydantic.json_schema import JsonSchemaValue
 from pydantic_core import core_schema
 
-
 logger = logging.getLogger(__name__)
 
 
@@ -211,6 +210,7 @@ class PostgresConnection(BaseConnection):
                 f"postgresql://{self.username}:{self.password.get_value()}"
                 f"@{self.host}:{self.port}/{self.database}"
             )
+            logger.info(f"Connection dsn: {dsn}")
 
             conn = await asyncpg.connect(dsn)
             try:

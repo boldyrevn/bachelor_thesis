@@ -29,6 +29,7 @@ class PipelineRun(Base):
 
     Tracks the overall status, parameters, and timing of a pipeline run.
     Contains references to all NodeRun instances for this execution.
+    The version_id points to the exact PipelineVersion that was executed.
     """
 
     __tablename__ = "pipeline_runs"
@@ -38,8 +39,11 @@ class PipelineRun(Base):
         primary_key=True,
         default=lambda: str(uuid.uuid4()),
     )
-    pipeline_id: Mapped[str] = mapped_column(
-        UUID(as_uuid=False), nullable=False, index=True
+    version_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False),
+        nullable=False,
+        index=True,
+        comment="The exact PipelineVersion that was executed",
     )
     status: Mapped[RunStatus] = mapped_column(
         String(50), default=RunStatus.PENDING, nullable=False, index=True
@@ -70,7 +74,7 @@ class PipelineRun(Base):
         return None
 
     def __repr__(self) -> str:
-        return f"<PipelineRun(id={self.id}, pipeline_id={self.pipeline_id}, status={self.status})>"
+        return f"<PipelineRun(id={self.id}, version_id={self.version_id}, status={self.status})>"
 
 
 # Pydantic schemas for API validation
@@ -79,7 +83,7 @@ class PipelineRun(Base):
 class PipelineRunBase(BaseModel):
     """Base schema for pipeline run data."""
 
-    pipeline_id: str
+    version_id: str
     parameters: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -108,7 +112,7 @@ class PipelineRunResponse(PipelineRunBase):
         duration = obj.duration
         return cls(
             id=obj.id,
-            pipeline_id=obj.pipeline_id,
+            version_id=obj.version_id,
             status=obj.status,
             parameters=obj.parameters,
             started_at=obj.started_at,

@@ -509,7 +509,7 @@
           "pipelines"
         ],
         "summary": "List Pipelines",
-        "description": "List all pipelines.\n\nArgs:\n    db: Database session\n\nReturns:\n    List of pipelines",
+        "description": "List all pipelines (latest version of each).\n\nArgs:\n    db: Database session\n\nReturns:\n    List of pipelines with their latest version info",
         "operationId": "list_pipelines_api_v1_pipelines_get",
         "responses": {
           "200": {
@@ -518,7 +518,7 @@
               "application/json": {
                 "schema": {
                   "items": {
-                    "$ref": "#/components/schemas/PipelineResponse"
+                    "$ref": "#/components/schemas/PipelineListItem"
                   },
                   "type": "array",
                   "title": "Response List Pipelines Api V1 Pipelines Get"
@@ -533,13 +533,13 @@
           "pipelines"
         ],
         "summary": "Create Pipeline",
-        "description": "Create a new pipeline.\n\nArgs:\n    pipeline_data: Pipeline creation data\n    db: Database session\n\nReturns:\n    Created pipeline\n\nRaises:\n    HTTPException: If pipeline with same name exists",
+        "description": "Create a new pipeline (version 1).\n\nArgs:\n    pipeline_data: Pipeline creation data\n    db: Database session\n\nReturns:\n    Created pipeline version\n\nRaises:\n    HTTPException: If pipeline with same name exists",
         "operationId": "create_pipeline_api_v1_pipelines_post",
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/PipelineCreate"
+                "$ref": "#/components/schemas/PipelineVersionCreate"
               }
             }
           },
@@ -551,7 +551,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/PipelineResponse"
+                  "$ref": "#/components/schemas/PipelineVersionResponse"
                 }
               }
             }
@@ -575,7 +575,7 @@
           "pipelines"
         ],
         "summary": "Get Pipeline",
-        "description": "Get pipeline by ID.\n\nArgs:\n    pipeline_id: Pipeline UUID\n    db: Database session\n\nReturns:\n    Pipeline\n\nRaises:\n    HTTPException: If pipeline not found",
+        "description": "Get latest version of a pipeline.\n\nArgs:\n    pipeline_id: Logical pipeline UUID\n    db: Database session\n\nReturns:\n    Current pipeline version\n\nRaises:\n    HTTPException: If pipeline not found",
         "operationId": "get_pipeline_api_v1_pipelines__pipeline_id__get",
         "parameters": [
           {
@@ -594,7 +594,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/PipelineResponse"
+                  "$ref": "#/components/schemas/PipelineVersionResponse"
                 }
               }
             }
@@ -616,7 +616,7 @@
           "pipelines"
         ],
         "summary": "Update Pipeline",
-        "description": "Update pipeline.\n\nArgs:\n    pipeline_id: Pipeline UUID\n    pipeline_data: Update data\n    db: Database session\n\nReturns:\n    Updated pipeline\n\nRaises:\n    HTTPException: If pipeline not found or name conflict",
+        "description": "Update pipeline by creating a new version.\n\nArgs:\n    pipeline_id: Logical pipeline UUID\n    pipeline_data: Update data\n    db: Database session\n\nReturns:\n    New pipeline version\n\nRaises:\n    HTTPException: If pipeline not found or name conflict",
         "operationId": "update_pipeline_api_v1_pipelines__pipeline_id__put",
         "parameters": [
           {
@@ -634,7 +634,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/PipelineUpdate"
+                "$ref": "#/components/schemas/PipelineVersionUpdate"
               }
             }
           }
@@ -645,7 +645,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/PipelineResponse"
+                  "$ref": "#/components/schemas/PipelineVersionResponse"
                 }
               }
             }
@@ -667,7 +667,7 @@
           "pipelines"
         ],
         "summary": "Delete Pipeline",
-        "description": "Delete pipeline.\n\nArgs:\n    pipeline_id: Pipeline UUID\n    db: Database session\n\nRaises:\n    HTTPException: If pipeline not found",
+        "description": "Delete pipeline and all its versions.\n\nArgs:\n    pipeline_id: Logical pipeline UUID\n    db: Database session\n\nRaises:\n    HTTPException: If pipeline not found",
         "operationId": "delete_pipeline_api_v1_pipelines__pipeline_id__delete",
         "parameters": [
           {
@@ -697,13 +697,112 @@
         }
       }
     },
+    "/api/v1/pipelines/{pipeline_id}/versions": {
+      "get": {
+        "tags": [
+          "pipelines"
+        ],
+        "summary": "List Pipeline Versions",
+        "description": "List all versions of a pipeline.\n\nArgs:\n    pipeline_id: Logical pipeline UUID\n    db: Database session\n\nReturns:\n    List of pipeline versions ordered by version number",
+        "operationId": "list_pipeline_versions_api_v1_pipelines__pipeline_id__versions_get",
+        "parameters": [
+          {
+            "name": "pipeline_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Pipeline Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/PipelineVersionResponse"
+                  },
+                  "title": "Response List Pipeline Versions Api V1 Pipelines  Pipeline Id  Versions Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/pipelines/{pipeline_id}/versions/{version_id}": {
+      "get": {
+        "tags": [
+          "pipelines"
+        ],
+        "summary": "Get Pipeline Version",
+        "description": "Get a specific version of a pipeline.\n\nArgs:\n    pipeline_id: Logical pipeline UUID\n    version_id: Pipeline version UUID\n    db: Database session\n\nReturns:\n    Specific pipeline version\n\nRaises:\n    HTTPException: If pipeline or version not found",
+        "operationId": "get_pipeline_version_api_v1_pipelines__pipeline_id__versions__version_id__get",
+        "parameters": [
+          {
+            "name": "pipeline_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Pipeline Id"
+            }
+          },
+          {
+            "name": "version_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Version Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PipelineVersionResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/pipelines/{pipeline_id}/run": {
       "post": {
         "tags": [
           "pipelines"
         ],
         "summary": "Run Pipeline",
-        "description": "Run pipeline synchronously.\n\nArgs:\n    pipeline_id: Pipeline UUID\n    parameters: Pipeline input parameters\n    db: Database session\n\nReturns:\n    Pipeline run result\n\nRaises:\n    HTTPException: If pipeline not found",
+        "description": "Run pipeline synchronously.\n\nArgs:\n    pipeline_id: Logical pipeline UUID\n    parameters: Pipeline input parameters\n    db: Database session\n\nReturns:\n    Pipeline run result\n\nRaises:\n    HTTPException: If pipeline not found",
         "operationId": "run_pipeline_api_v1_pipelines__pipeline_id__run_post",
         "parameters": [
           {
@@ -763,7 +862,7 @@
           "pipelines"
         ],
         "summary": "Run Pipeline Stream",
-        "description": "Run pipeline with SSE log streaming.\n\nArgs:\n    pipeline_id: Pipeline UUID\n    parameters: Pipeline input parameters\n    db: Database session\n\nReturns:\n    SSE stream of logs and final result",
+        "description": "Run pipeline with SSE log streaming.\n\nArgs:\n    pipeline_id: Logical pipeline UUID\n    parameters: Pipeline input parameters\n    db: Database session\n\nReturns:\n    SSE stream of logs and final result",
         "operationId": "run_pipeline_stream_api_v1_pipelines__pipeline_id__run_stream_post",
         "parameters": [
           {
@@ -864,7 +963,7 @@
           "pipeline-runs"
         ],
         "summary": "List Pipeline Runs",
-        "description": "List all runs for a pipeline.\n\nArgs:\n    pipeline_id: Pipeline UUID\n    limit: Max number of runs to return\n    offset: Offset for pagination\n    db: Database session\n\nReturns:\n    List of pipeline runs with count",
+        "description": "List all runs for a pipeline (across all versions).\n\nArgs:\n    pipeline_id: Logical pipeline UUID\n    limit: Max number of runs to return\n    offset: Offset for pagination\n    db: Database session\n\nReturns:\n    List of pipeline runs with count",
         "operationId": "list_pipeline_runs_api_v1_pipelines__pipeline_id__runs_get",
         "parameters": [
           {
@@ -1243,12 +1342,14 @@
         "title": "NodeTypeResponse",
         "description": "Schema for node type API response."
       },
-      "PipelineCreate": {
+      "PipelineListItem": {
         "properties": {
+          "pipeline_id": {
+            "type": "string",
+            "title": "Pipeline Id"
+          },
           "name": {
             "type": "string",
-            "maxLength": 255,
-            "minLength": 1,
             "title": "Name"
           },
           "description": {
@@ -1262,44 +1363,23 @@
             ],
             "title": "Description"
           },
-          "graph_definition": {
-            "type": "object",
-            "title": "Graph Definition"
-          }
-        },
-        "type": "object",
-        "required": [
-          "name"
-        ],
-        "title": "PipelineCreate",
-        "description": "Schema for creating a new pipeline."
-      },
-      "PipelineResponse": {
-        "properties": {
-          "name": {
+          "latest_version": {
+            "type": "integer",
+            "title": "Latest Version"
+          },
+          "is_current_id": {
             "type": "string",
-            "maxLength": 255,
-            "minLength": 1,
-            "title": "Name"
+            "title": "Is Current Id"
           },
-          "description": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Description"
+          "node_count": {
+            "type": "integer",
+            "title": "Node Count",
+            "default": 0
           },
-          "id": {
-            "type": "string",
-            "title": "Id"
-          },
-          "graph_definition": {
-            "type": "object",
-            "title": "Graph Definition"
+          "edge_count": {
+            "type": "integer",
+            "title": "Edge Count",
+            "default": 0
           },
           "created_at": {
             "type": "string",
@@ -1314,20 +1394,21 @@
         },
         "type": "object",
         "required": [
+          "pipeline_id",
           "name",
-          "id",
-          "graph_definition",
+          "latest_version",
+          "is_current_id",
           "created_at",
           "updated_at"
         ],
-        "title": "PipelineResponse",
-        "description": "Schema for pipeline response."
+        "title": "PipelineListItem",
+        "description": "Summary item for pipeline list (shows latest version info)."
       },
       "PipelineRunResponse": {
         "properties": {
-          "pipeline_id": {
+          "version_id": {
             "type": "string",
-            "title": "Pipeline Id"
+            "title": "Version Id"
           },
           "parameters": {
             "type": "object",
@@ -1389,7 +1470,7 @@
         },
         "type": "object",
         "required": [
-          "pipeline_id",
+          "version_id",
           "id",
           "status",
           "started_at",
@@ -1399,7 +1480,101 @@
         "title": "PipelineRunResponse",
         "description": "Schema for pipeline run response."
       },
-      "PipelineUpdate": {
+      "PipelineVersionCreate": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Name"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "graph_definition": {
+            "type": "object",
+            "title": "Graph Definition"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "title": "PipelineVersionCreate",
+        "description": "Schema for creating a new pipeline version."
+      },
+      "PipelineVersionResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "pipeline_id": {
+            "type": "string",
+            "title": "Pipeline Id"
+          },
+          "version": {
+            "type": "integer",
+            "title": "Version"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "graph_definition": {
+            "type": "object",
+            "title": "Graph Definition"
+          },
+          "is_current": {
+            "type": "boolean",
+            "title": "Is Current"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "pipeline_id",
+          "version",
+          "name",
+          "description",
+          "graph_definition",
+          "is_current",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "PipelineVersionResponse",
+        "description": "Schema for pipeline version response."
+      },
+      "PipelineVersionUpdate": {
         "properties": {
           "name": {
             "anyOf": [
@@ -1438,8 +1613,8 @@
           }
         },
         "type": "object",
-        "title": "PipelineUpdate",
-        "description": "Schema for updating a pipeline."
+        "title": "PipelineVersionUpdate",
+        "description": "Schema for updating pipeline data (creates new version)."
       },
       "RunStatus": {
         "type": "string",

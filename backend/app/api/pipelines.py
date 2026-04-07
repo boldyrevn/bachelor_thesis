@@ -1,22 +1,24 @@
-"""Pipeline API endpoints for CRUD operations and execution."""
+"""Pipeline API endpoints for CRUD operations and execution.
 
-import asyncio
-import json
+All operations use PipelineVersion model where each save creates a new version.
+The pipeline_id in URL refers to the logical pipeline (groups versions).
+"""
+
 import uuid
 from datetime import datetime
-from typing import Any, AsyncGenerator
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import get_db_session
-from app.models.pipeline import (
-    Pipeline,
-    PipelineCreate,
-    PipelineResponse,
-    PipelineUpdate,
+from app.models.pipeline_version import (
+    PipelineVersion,
+    PipelineVersionCreate,
+    PipelineVersionResponse,
+    PipelineVersionUpdate,
+    PipelineListItem,
 )
 from app.models.pipeline_run import PipelineRun, PipelineRunResponse, RunStatus
 from app.orchestration.pipeline_executor import execute_pipeline_with_streaming
@@ -24,26 +26,31 @@ from app.orchestration.pipeline_executor import execute_pipeline_with_streaming
 router = APIRouter(prefix="/api/v1/pipelines", tags=["pipelines"])
 
 
-@router.post("", response_model=PipelineResponse, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "", response_model=PipelineVersionResponse, status_code=status.HTTP_201_CREATED
+)
 async def create_pipeline(
-    pipeline_data: PipelineCreate,
+    pipeline_data: PipelineVersionCreate,
     db: AsyncSession = Depends(get_db_session),
-) -> Pipeline:
-    """Create a new pipeline.
+) -> PipelineVersion:
+    """Create a new pipeline (version 1).
 
     Args:
         pipeline_data: Pipeline creation data
         db: Database session
 
     Returns:
-        Created pipeline
+        Created pipeline version
 
     Raises:
         HTTPException: If pipeline with same name exists
     """
-    # Check for duplicate name
+    # Check for duplicate name in current versions
     result = await db.execute(
-        select(Pipeline).where(Pipeline.name == pipeline_data.name)
+        select(PipelineVersion).where(
+            PipelineVersion.name == pipeline_data.name,
+            PipelineVersion.is_current == True,
+        )
     )
     existing = result.scalar_one_or_none()
     if existing:
@@ -63,109 +70,209 @@ async def create_pipeline(
                 detail=f"Invalid graph definition: {error}",
             )
 
-    # Create pipeline
-    pipeline = Pipeline(
+    # Generate a new logical pipeline_id
+    pipeline_id = str(uuid.uuid4())
+
+    # Create first version
+    version = PipelineVersion(
+        pipeline_id=pipeline_id,
+        version=1,
         name=pipeline_data.name,
         description=pipeline_data.description,
         graph_definition=pipeline_data.graph_definition or {},
+        is_current=True,
     )
 
-    db.add(pipeline)
+    db.add(version)
     await db.commit()
-    await db.refresh(pipeline)
+    await db.refresh(version)
 
-    return pipeline
+    return version
 
 
-@router.get("", response_model=list[PipelineResponse])
+@router.get("", response_model=list[PipelineListItem])
 async def list_pipelines(
     db: AsyncSession = Depends(get_db_session),
-) -> list[Pipeline]:
-    """List all pipelines.
+) -> list[PipelineListItem]:
+    """List all pipelines (latest version of each).
 
     Args:
         db: Database session
 
     Returns:
-        List of pipelines
+        List of pipelines with their latest version info
     """
-    result = await db.execute(select(Pipeline).order_by(Pipeline.created_at.desc()))
-    return list(result.scalars().all())
+    # Get all current versions (one per pipeline_id)
+    result = await db.execute(
+        select(PipelineVersion)
+        .where(PipelineVersion.is_current == True)
+        .order_by(PipelineVersion.created_at.desc())
+    )
+    current_versions = result.scalars().all()
+
+    return [
+        PipelineListItem(
+            pipeline_id=v.pipeline_id,
+            name=v.name,
+            description=v.description,
+            latest_version=v.version,
+            is_current_id=v.id,
+            node_count=len(v.graph_definition.get("nodes", [])),
+            edge_count=len(v.graph_definition.get("edges", [])),
+            created_at=v.created_at,
+            updated_at=v.updated_at,
+        )
+        for v in current_versions
+    ]
 
 
-@router.get("/{pipeline_id}", response_model=PipelineResponse)
+@router.get("/{pipeline_id}", response_model=PipelineVersionResponse)
 async def get_pipeline(
     pipeline_id: str,
     db: AsyncSession = Depends(get_db_session),
-) -> Pipeline:
-    """Get pipeline by ID.
+) -> PipelineVersion:
+    """Get latest version of a pipeline.
 
     Args:
-        pipeline_id: Pipeline UUID
+        pipeline_id: Logical pipeline UUID
         db: Database session
 
     Returns:
-        Pipeline
+        Current pipeline version
 
     Raises:
         HTTPException: If pipeline not found
     """
-    result = await db.execute(select(Pipeline).where(Pipeline.id == pipeline_id))
-    pipeline = result.scalar_one_or_none()
+    result = await db.execute(
+        select(PipelineVersion).where(
+            PipelineVersion.pipeline_id == pipeline_id,
+            PipelineVersion.is_current == True,
+        )
+    )
+    version = result.scalar_one_or_none()
 
-    if not pipeline:
+    if not version:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Pipeline '{pipeline_id}' not found",
         )
 
-    return pipeline
+    return version
 
 
-@router.put("/{pipeline_id}", response_model=PipelineResponse)
-async def update_pipeline(
+@router.get("/{pipeline_id}/versions", response_model=list[PipelineVersionResponse])
+async def list_pipeline_versions(
     pipeline_id: str,
-    pipeline_data: PipelineUpdate,
     db: AsyncSession = Depends(get_db_session),
-) -> Pipeline:
-    """Update pipeline.
+) -> list[PipelineVersion]:
+    """List all versions of a pipeline.
 
     Args:
-        pipeline_id: Pipeline UUID
+        pipeline_id: Logical pipeline UUID
+        db: Database session
+
+    Returns:
+        List of pipeline versions ordered by version number
+    """
+    result = await db.execute(
+        select(PipelineVersion)
+        .where(PipelineVersion.pipeline_id == pipeline_id)
+        .order_by(PipelineVersion.created_at.desc())
+    )
+    return list(result.scalars().all())
+
+
+@router.get(
+    "/{pipeline_id}/versions/{version_id}", response_model=PipelineVersionResponse
+)
+async def get_pipeline_version(
+    pipeline_id: str,
+    version_id: str,
+    db: AsyncSession = Depends(get_db_session),
+) -> PipelineVersion:
+    """Get a specific version of a pipeline.
+
+    Args:
+        pipeline_id: Logical pipeline UUID
+        version_id: Pipeline version UUID
+        db: Database session
+
+    Returns:
+        Specific pipeline version
+
+    Raises:
+        HTTPException: If pipeline or version not found
+    """
+    result = await db.execute(
+        select(PipelineVersion).where(
+            PipelineVersion.pipeline_id == pipeline_id,
+            PipelineVersion.id == version_id,
+        )
+    )
+    version = result.scalar_one_or_none()
+
+    if not version:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Version '{version_id}' not found in pipeline '{pipeline_id}'",
+        )
+
+    return version
+
+
+@router.put("/{pipeline_id}", response_model=PipelineVersionResponse)
+async def update_pipeline(
+    pipeline_id: str,
+    pipeline_data: PipelineVersionUpdate,
+    db: AsyncSession = Depends(get_db_session),
+) -> PipelineVersion:
+    """Update pipeline by creating a new version.
+
+    Args:
+        pipeline_id: Logical pipeline UUID
         pipeline_data: Update data
         db: Database session
 
     Returns:
-        Updated pipeline
+        New pipeline version
 
     Raises:
         HTTPException: If pipeline not found or name conflict
     """
-    result = await db.execute(select(Pipeline).where(Pipeline.id == pipeline_id))
-    pipeline = result.scalar_one_or_none()
+    # Get current version
+    result = await db.execute(
+        select(PipelineVersion).where(
+            PipelineVersion.pipeline_id == pipeline_id,
+            PipelineVersion.is_current == True,
+        )
+    )
+    current = result.scalar_one_or_none()
 
-    if not pipeline:
+    if not current:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Pipeline '{pipeline_id}' not found",
         )
 
     # Check name conflict if updating name
-    if pipeline_data.name and pipeline_data.name != pipeline.name:
+    new_name = pipeline_data.name or current.name
+    if new_name != current.name:
         existing = await db.execute(
-            select(Pipeline).where(
-                Pipeline.name == pipeline_data.name, Pipeline.id != pipeline_id
+            select(PipelineVersion).where(
+                PipelineVersion.name == new_name,
+                PipelineVersion.is_current == True,
+                PipelineVersion.pipeline_id != pipeline_id,
             )
         )
         if existing.scalar_one_or_none():
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Pipeline with name '{pipeline_data.name}' already exists",
+                detail=f"Pipeline with name '{new_name}' already exists",
             )
-        pipeline.name = pipeline_data.name
 
     # Validate graph if updating
-    if pipeline_data.graph_definition:
+    new_graph = pipeline_data.graph_definition or current.graph_definition
+    if pipeline_data.graph_definition is not None:
         from app.orchestration.graph_resolver import validate_pipeline_graph
 
         is_valid, error = validate_pipeline_graph(pipeline_data.graph_definition)
@@ -174,17 +281,29 @@ async def update_pipeline(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Invalid graph definition: {error}",
             )
-        pipeline.graph_definition = pipeline_data.graph_definition
 
-    if pipeline_data.description is not None:
-        pipeline.description = pipeline_data.description
+    # Mark current version as not current
+    current.is_current = False
 
-    pipeline.updated_at = datetime.utcnow()
+    # Create new version
+    new_version = PipelineVersion(
+        pipeline_id=pipeline_id,
+        version=current.version + 1,
+        name=new_name,
+        description=(
+            pipeline_data.description
+            if pipeline_data.description is not None
+            else current.description
+        ),
+        graph_definition=new_graph,
+        is_current=True,
+    )
 
+    db.add(new_version)
     await db.commit()
-    await db.refresh(pipeline)
+    await db.refresh(new_version)
 
-    return pipeline
+    return new_version
 
 
 @router.delete("/{pipeline_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -192,25 +311,36 @@ async def delete_pipeline(
     pipeline_id: str,
     db: AsyncSession = Depends(get_db_session),
 ) -> None:
-    """Delete pipeline.
+    """Delete pipeline and all its versions.
 
     Args:
-        pipeline_id: Pipeline UUID
+        pipeline_id: Logical pipeline UUID
         db: Database session
 
     Raises:
         HTTPException: If pipeline not found
     """
-    result = await db.execute(select(Pipeline).where(Pipeline.id == pipeline_id))
-    pipeline = result.scalar_one_or_none()
+    result = await db.execute(
+        select(PipelineVersion).where(
+            PipelineVersion.pipeline_id == pipeline_id,
+            PipelineVersion.is_current == True,
+        )
+    )
+    current = result.scalar_one_or_none()
 
-    if not pipeline:
+    if not current:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Pipeline '{pipeline_id}' not found",
         )
 
-    await db.delete(pipeline)
+    # Delete all versions (cascade handles this)
+    result = await db.execute(
+        select(PipelineVersion).where(PipelineVersion.pipeline_id == pipeline_id)
+    )
+    versions = result.scalars().all()
+    for v in versions:
+        await db.delete(v)
     await db.commit()
 
 
@@ -227,7 +357,7 @@ async def run_pipeline(
     """Run pipeline synchronously.
 
     Args:
-        pipeline_id: Pipeline UUID
+        pipeline_id: Logical pipeline UUID
         parameters: Pipeline input parameters
         db: Database session
 
@@ -237,11 +367,16 @@ async def run_pipeline(
     Raises:
         HTTPException: If pipeline not found
     """
-    # Get pipeline
-    result = await db.execute(select(Pipeline).where(Pipeline.id == pipeline_id))
-    pipeline = result.scalar_one_or_none()
+    # Get current version
+    result = await db.execute(
+        select(PipelineVersion).where(
+            PipelineVersion.pipeline_id == pipeline_id,
+            PipelineVersion.is_current == True,
+        )
+    )
+    version = result.scalar_one_or_none()
 
-    if not pipeline:
+    if not version:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Pipeline '{pipeline_id}' not found",
@@ -251,7 +386,7 @@ async def run_pipeline(
     run_id = str(uuid.uuid4())
     pipeline_run = PipelineRun(
         id=run_id,
-        pipeline_id=pipeline_id,
+        version_id=version.id,
         status=RunStatus.RUNNING,
         parameters=parameters or {},
         started_at=datetime.utcnow(),
@@ -267,7 +402,7 @@ async def run_pipeline(
         async for _, result in execute_pipeline_with_streaming(
             pipeline_id=pipeline_id,
             pipeline_run_id=run_id,
-            graph_definition=pipeline.graph_definition,
+            graph_definition=version.graph_definition,
             pipeline_params=parameters or {},
         ):
             final_result = result
@@ -292,118 +427,6 @@ async def run_pipeline(
     await db.refresh(pipeline_run)
 
     return pipeline_run
-
-
-@router.post("/{pipeline_id}/run/stream")
-async def run_pipeline_stream(
-    pipeline_id: str,
-    parameters: dict[str, Any] | None = None,
-    db: AsyncSession = Depends(get_db_session),
-) -> StreamingResponse:
-    """Run pipeline with SSE log streaming.
-
-    Args:
-        pipeline_id: Pipeline UUID
-        parameters: Pipeline input parameters
-        db: Database session
-
-    Returns:
-        SSE stream of logs and final result
-    """
-    # Get pipeline
-    result = await db.execute(select(Pipeline).where(Pipeline.id == pipeline_id))
-    pipeline = result.scalar_one_or_none()
-
-    if not pipeline:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Pipeline '{pipeline_id}' not found",
-        )
-
-    # Create pipeline run
-    run_id = str(uuid.uuid4())
-    pipeline_run = PipelineRun(
-        id=run_id,
-        pipeline_id=pipeline_id,
-        status=RunStatus.RUNNING,
-        parameters=parameters or {},
-        started_at=datetime.utcnow(),
-    )
-
-    db.add(pipeline_run)
-    await db.commit()
-
-    async def generate_sse() -> AsyncGenerator[str, None]:
-        """Generate SSE events."""
-        try:
-            executor = execute_pipeline_with_streaming(
-                pipeline_id=pipeline_id,
-                pipeline_run_id=run_id,
-                graph_definition=pipeline.graph_definition,
-                pipeline_params=parameters or {},
-            )
-
-            async for logs, result in executor:
-                # Stream logs
-                for log in logs:
-                    event = {
-                        "type": "log",
-                        "pipeline_run_id": run_id,
-                        "node_id": log.node_id,
-                        "level": log.level,
-                        "message": log.message,
-                        "timestamp": datetime.utcnow().isoformat(),
-                    }
-                    yield f"data: {json.dumps(event)}\n\n"
-
-                # Stream final result
-                if result is not None:
-                    # Update run status
-                    if result.success:
-                        pipeline_run.status = RunStatus.SUCCESS
-                    else:
-                        pipeline_run.status = RunStatus.FAILED
-                        pipeline_run.error_message = result.error
-
-                    pipeline_run.completed_at = datetime.utcnow()
-                    await db.commit()
-
-                    event = {
-                        "type": "result",
-                        "pipeline_run_id": run_id,
-                        "success": result.success,
-                        "error": result.error,
-                        "node_results": {
-                            node_id: {
-                                "success": node_result.get("success"),
-                                "outputs": node_result.get("outputs"),
-                            }
-                            for node_id, node_result in result.node_results.items()
-                        },
-                    }
-                    yield f"data: {json.dumps(event)}\n\n"
-
-        except Exception as e:
-            pipeline_run.status = RunStatus.FAILED
-            pipeline_run.error_message = str(e)
-            await db.commit()
-
-            event = {
-                "type": "error",
-                "pipeline_run_id": run_id,
-                "error": str(e),
-            }
-            yield f"data: {json.dumps(event)}\n\n"
-
-    return StreamingResponse(
-        generate_sse(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",  # Disable nginx buffering
-        },
-    )
 
 
 @router.get("/runs/{run_id}", response_model=PipelineRunResponse)

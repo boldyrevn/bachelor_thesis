@@ -50,13 +50,17 @@ import {
 } from './ConnectionDragContext';
 import { AddNodeDialog } from './AddNodeDialog';
 import { NodeParamsForm } from '../components/NodeParamsForm';
+import { VersionSelector } from './VersionSelector';
 import { getNodeType } from '../api/nodeTypes';
 import {
   createPipeline,
   updatePipeline,
   getPipeline,
+  getPipelineVersion,
+  getPipelineVersions,
   type PipelineNode,
   type PipelineEdge,
+  type PipelineVersion,
 } from '../api/pipelines';
 import { api } from '../api/client';
 import { useRegisterHeaderAction } from '../context/HeaderActionsContext';
@@ -117,6 +121,10 @@ function PipelineEditorWithContext() {
   const formValuesRef = useRef(saveForm.values);
   formValuesRef.current = saveForm.values;
 
+  // Pipeline versions
+  const [versions, setVersions] = useState<PipelineVersion[]>([]);
+  const [currentVersionId, setCurrentVersionId] = useState<string | null>(null);
+
   // Load existing pipeline if pipelineId is present
   useEffect(() => {
     if (!pipelineId) return;
@@ -148,6 +156,7 @@ function PipelineEditorWithContext() {
         setNodes(rfNodes);
         setEdges(rfEdges);
         setPipelineName(pipeline.name);
+        setCurrentVersionId(pipeline.id);
         saveForm.setValues({
           name: pipeline.name,
           description: pipeline.description || '',
@@ -162,6 +171,67 @@ function PipelineEditorWithContext() {
         });
       });
   }, [pipelineId]);
+
+  // Load versions when pipelineId is present
+  useEffect(() => {
+    if (!pipelineId) {
+      setVersions([]);
+      return;
+    }
+    getPipelineVersions(pipelineId)
+      .then((v) => setVersions(v))
+      .catch(() => setVersions([]));
+  }, [pipelineId]);
+
+  // Switch to a specific version: load its graph and update form
+  const switchToVersion = useCallback(
+    (versionId: string) => {
+      if (!pipelineId) return;
+      getPipelineVersion(pipelineId, versionId)
+        .then((version) => {
+          const { graph_definition } = version;
+
+          const rfNodes: Node<CanvasNodeData>[] = (graph_definition.nodes || []).map((n) => ({
+            id: n.id,
+            type: 'flowNode',
+            position: { x: n.position.x ?? 0, y: n.position.y ?? 0 },
+            data: {
+              label: (n.data.label as string) || n.id,
+              nodeType: n.type,
+              config: (n.data.config as Record<string, unknown>) || n.data,
+            },
+          }));
+
+          const rfEdges: Edge[] = (graph_definition.edges || []).map((e) => ({
+            id: e.id,
+            source: e.source,
+            target: e.target,
+            sourceHandle: e.source_handle,
+            targetHandle: e.target_handle,
+            type: 'flowEdge',
+          }));
+
+          setNodes(rfNodes);
+          setEdges(rfEdges);
+          setCurrentVersionId(version.id);
+          saveForm.setValues({
+            name: version.name,
+            description: version.description || '',
+          });
+          setPipelineName(version.name);
+          setSelectedNodeId(null);
+        })
+        .catch((err) => {
+          console.error('Failed to load version:', err);
+          notifications.show({
+            title: 'Error',
+            message: 'Failed to load pipeline version',
+            color: 'red',
+          });
+        });
+    },
+    [pipelineId, setNodes, setEdges, setPipelineName, saveForm]
+  );
 
   const buildGraphDefinition = useCallback(() => {
     const { nodes: currentNodes, edges: currentEdges } = graphRef.current;
@@ -194,12 +264,16 @@ function PipelineEditorWithContext() {
         const graphDefinition = buildGraphDefinition();
 
         if (pipelineId) {
-          await updatePipeline(pipelineId, {
+          const updatedVersion = await updatePipeline(pipelineId, {
             name: values.name,
             description: values.description || undefined,
             graph_definition: graphDefinition,
           });
           setPipelineName(values.name);
+          setCurrentVersionId(updatedVersion.id);
+          // Refresh versions list
+          const updatedVersions = await getPipelineVersions(pipelineId);
+          setVersions(updatedVersions);
           notifications.show({
             title: 'Success',
             message: 'Pipeline updated successfully',
@@ -211,7 +285,8 @@ function PipelineEditorWithContext() {
             description: values.description || undefined,
             graph_definition: graphDefinition,
           });
-          setPipelineId(response.id);
+          // response is PipelineVersion with pipeline_id
+          setPipelineId(response.pipeline_id);
           setPipelineName(values.name);
           notifications.show({
             title: 'Success',
@@ -219,7 +294,7 @@ function PipelineEditorWithContext() {
             color: 'green',
           });
           // Redirect to update page for new pipelines
-          navigate(`/pipelines/${response.id}/update`);
+          navigate(`/pipelines/${response.pipeline_id}/update`);
           return;
         }
       } catch (error: any) {
@@ -490,7 +565,7 @@ function PipelineEditorWithContext() {
 
   return (
     <Box style={{ display: 'flex', height: '100%' }}>
-      {/* Left panel: Pipeline Parameters */}
+      {/* Left panel: Pipeline Parameters + Version Selector */}
       <Box
         style={{
           width: leftWidth,
@@ -522,7 +597,14 @@ function PipelineEditorWithContext() {
             size="sm"
           />
         </Box>
-        <Box p="md" style={{ flex: 1 }} />
+        {/* Version Selector */}
+        {pipelineId && (
+          <VersionSelector
+            versions={versions}
+            selectedVersionId={currentVersionId}
+            onVersionSelect={switchToVersion}
+          />
+        )}
       </Box>
 
       <ResizeHandle

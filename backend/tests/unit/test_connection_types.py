@@ -225,7 +225,6 @@ class NestedInput(BaseModel):
 
 class ValidWithNested(BaseModel):
     text: str
-    nested: NestedInput
     optional_host: Optional[str] = None
     pg_connection: PostgresConnection
 
@@ -237,7 +236,7 @@ class TestInputSchemaValidation:
         errors = validate_input_schema(ValidInput)
         assert errors == []
 
-    def test_valid_with_nested(self):
+    def test_valid_without_nested(self):
         errors = validate_input_schema(ValidWithNested)
         assert errors == []
 

@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import get_db_session
 from app.core.config import settings
-from app.models.pipeline import Pipeline
+from app.models.pipeline_version import PipelineVersion
 from app.models.pipeline_run import PipelineRun, RunStatus
 from app.models.node_run import NodeRun
 
@@ -46,8 +46,22 @@ async def list_all_runs(
     count_result = await db.execute(select(PipelineRun.id))
     total = len(count_result.scalars().all())
 
+    # Collect version_ids to look up pipeline_ids
+    version_ids = list({r.version_id for r in runs})
+    if version_ids:
+        versions_result = await db.execute(
+            select(PipelineVersion.id, PipelineVersion.pipeline_id).where(
+                PipelineVersion.id.in_(version_ids)
+            )
+        )
+        version_to_pipeline = {row[0]: row[1] for row in versions_result}
+    else:
+        version_to_pipeline = {}
+
     return {
-        "runs": [_run_to_dict(run) for run in runs],
+        "runs": [
+            _run_to_dict(run, version_to_pipeline.get(run.version_id)) for run in runs
+        ],
         "total": total,
     }
 
@@ -59,10 +73,10 @@ async def list_pipeline_runs(
     offset: int = 0,
     db: AsyncSession = Depends(get_db_session),
 ) -> dict:
-    """List all runs for a pipeline.
+    """List all runs for a pipeline (across all versions).
 
     Args:
-        pipeline_id: Pipeline UUID
+        pipeline_id: Logical pipeline UUID
         limit: Max number of runs to return
         offset: Offset for pagination
         db: Database session
@@ -70,27 +84,34 @@ async def list_pipeline_runs(
     Returns:
         List of pipeline runs with count
     """
-    # Verify pipeline exists
-    result = await db.execute(select(Pipeline).where(Pipeline.id == pipeline_id))
-    if not result.scalar_one_or_none():
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Pipeline '{pipeline_id}' not found",
-        )
+    # Get all version IDs for this pipeline
+    versions_result = await db.execute(
+        select(PipelineVersion.id).where(PipelineVersion.pipeline_id == pipeline_id)
+    )
+    version_ids = [row[0] for row in versions_result.all()]
 
-    # Get runs
+    if not version_ids:
+        return {"runs": [], "total": 0}
+
+    # Get runs for all versions of this pipeline
     result = await db.execute(
         select(PipelineRun)
-        .where(PipelineRun.pipeline_id == pipeline_id)
+        .where(PipelineRun.version_id.in_(version_ids))
         .order_by(PipelineRun.started_at.desc())
         .offset(offset)
         .limit(limit)
     )
     runs = result.scalars().all()
 
+    # Count total
+    count_result = await db.execute(
+        select(PipelineRun.id).where(PipelineRun.version_id.in_(version_ids))
+    )
+    total = len(count_result.scalars().all())
+
     return {
         "runs": [_run_to_dict(run) for run in runs],
-        "total": len(runs),
+        "total": total,
     }
 
 
@@ -161,16 +182,16 @@ async def get_node_run_logs(
     return {"logs": content}
 
 
-def _run_to_dict(run: PipelineRun) -> dict:
+def _run_to_dict(run: PipelineRun, pipeline_id: str | None = None) -> dict:
     """Convert PipelineRun to dict."""
     duration = None
     if run.started_at and run.completed_at:
         delta = run.completed_at - run.started_at
         duration = delta.total_seconds()
 
-    return {
+    result = {
         "id": run.id,
-        "pipeline_id": run.pipeline_id,
+        "version_id": run.version_id,
         "status": run.status.value if isinstance(run.status, RunStatus) else run.status,
         "parameters": run.parameters,
         "started_at": run.started_at.isoformat() if run.started_at else None,
@@ -178,6 +199,9 @@ def _run_to_dict(run: PipelineRun) -> dict:
         "error_message": run.error_message,
         "duration_seconds": duration,
     }
+    if pipeline_id:
+        result["pipeline_id"] = pipeline_id
+    return result
 
 
 def _node_run_to_dict(nr: NodeRun) -> dict:

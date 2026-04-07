@@ -5,7 +5,7 @@ from datetime import datetime
 from typing import Any, Optional
 
 from pydantic import BaseModel
-from sqlalchemy import DateTime, ForeignKey, String, Text
+from sqlalchemy import DateTime, ForeignKey, String
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -16,8 +16,9 @@ from .pipeline_run import RunStatus
 class NodeRun(Base):
     """Represents a single node execution within a pipeline run.
 
-    Tracks the status, logs, and output values for a node.
+    Tracks the status, timing, and output values for a node.
     Output values are stored as JSONB for flexible artifact tracking.
+    Detailed logs are stored in log files on disk.
     """
 
     __tablename__ = "node_runs"
@@ -38,7 +39,6 @@ class NodeRun(Base):
     status: Mapped[RunStatus] = mapped_column(
         String(50), default=RunStatus.PENDING, nullable=False, index=True
     )
-    logs: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     output_values: Mapped[dict[str, Any]] = mapped_column(
         JSONB, nullable=False, default=dict
     )
@@ -48,7 +48,6 @@ class NodeRun(Base):
     completed_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
-    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     # Relationship to pipeline run
     pipeline_run: Mapped["PipelineRun"] = relationship(
@@ -80,9 +79,7 @@ class NodeRunUpdate(BaseModel):
     """Schema for updating a node run."""
 
     status: Optional[RunStatus] = None
-    logs: Optional[str] = None
     output_values: Optional[dict[str, Any]] = None
-    error_message: Optional[str] = None
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
 
@@ -93,11 +90,9 @@ class NodeRunResponse(NodeRunBase):
     id: str
     pipeline_run_id: str
     status: RunStatus
-    logs: Optional[str]
     output_values: dict[str, Any]
     started_at: Optional[datetime]
     completed_at: Optional[datetime]
-    error_message: Optional[str]
 
     class Config:
         from_attributes = True

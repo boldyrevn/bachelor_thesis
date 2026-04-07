@@ -53,13 +53,30 @@ export interface PipelineParamDef {
 }
 
 /**
- * Pipeline response from API
+ * Pipeline version response from API
+ * Each save creates a new version; this represents one version.
  */
-export interface PipelineResponse {
+export interface PipelineVersion {
   id: string;
+  pipeline_id: string;
+  version: number;
   name: string;
   description: string | null;
   graph_definition: GraphDefinition;
+  is_current: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+/**
+ * Pipeline list item (summary of latest version)
+ */
+export interface PipelineListItem {
+  pipeline_id: string;
+  name: string;
+  description: string | null;
+  latest_version: number;
+  is_current_id: string;
   created_at: string;
   updated_at: string;
 }
@@ -94,11 +111,11 @@ export enum RunStatus {
 }
 
 /**
- * Pipeline run response
+ * Pipeline run response from API
  */
 export interface PipelineRunResponse {
   id: string;
-  pipeline_id: string;
+  version_id: string;
   status: RunStatus;
   parameters: Record<string, unknown>;
   started_at: string | null;

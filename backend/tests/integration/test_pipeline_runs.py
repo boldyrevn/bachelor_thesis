@@ -1,32 +1,39 @@
 """Integration tests for pipeline run API endpoints."""
 
 import uuid
+
 import pytest
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.pipeline import Pipeline
+from app.models.pipeline_version import PipelineVersion
 from app.models.pipeline_run import PipelineRun, RunStatus
 from app.models.node_run import NodeRun
 
 
-async def _create_pipeline(db: AsyncSession, name: str = "test_pipeline") -> Pipeline:
-    """Helper to create a pipeline in DB."""
-    pipeline = Pipeline(
+async def _create_pipeline(
+    db: AsyncSession, name: str = "test_pipeline"
+) -> PipelineVersion:
+    """Helper to create a pipeline (version 1) in DB."""
+    pipeline_id = str(uuid.uuid4())
+    version = PipelineVersion(
+        pipeline_id=pipeline_id,
+        version=1,
         name=f"{name}_{uuid.uuid4().hex[:8]}",
         description="Test pipeline",
         graph_definition={"nodes": [], "edges": []},
+        is_current=True,
     )
-    db.add(pipeline)
+    db.add(version)
     await db.commit()
-    await db.refresh(pipeline)
-    return pipeline
+    await db.refresh(version)
+    return version
 
 
-async def _create_run(db: AsyncSession, pipeline_id: str) -> PipelineRun:
+async def _create_run(db: AsyncSession, version_id: str) -> PipelineRun:
     """Helper to create a pipeline run."""
     run = PipelineRun(
-        pipeline_id=pipeline_id,
+        version_id=version_id,
         status=RunStatus.SUCCESS,
         parameters={"key": "value"},
     )
@@ -55,7 +62,7 @@ async def _create_node_run(db: AsyncSession, run_id: str) -> NodeRun:
 async def test_list_runs_empty(client: AsyncClient, db_session: AsyncSession):
     """Test listing runs for a pipeline with no runs."""
     pipeline = await _create_pipeline(db_session)
-    resp = await client.get(f"/api/v1/pipelines/{pipeline.id}/runs")
+    resp = await client.get(f"/api/v1/pipelines/{pipeline.pipeline_id}/runs")
     assert resp.status_code == 200
     data = resp.json()
     assert data["total"] == 0
@@ -69,7 +76,7 @@ async def test_list_runs_with_runs(client: AsyncClient, db_session: AsyncSession
     run1 = await _create_run(db_session, pipeline.id)
     run2 = await _create_run(db_session, pipeline.id)
 
-    resp = await client.get(f"/api/v1/pipelines/{pipeline.id}/runs")
+    resp = await client.get(f"/api/v1/pipelines/{pipeline.pipeline_id}/runs")
     assert resp.status_code == 200
     data = resp.json()
     assert data["total"] == 2
@@ -84,7 +91,10 @@ async def test_list_runs_pipeline_not_found(client: AsyncClient):
     """Test listing runs for non-existent pipeline."""
     fake_id = str(uuid.uuid4())
     resp = await client.get(f"/api/v1/pipelines/{fake_id}/runs")
-    assert resp.status_code == 404
+    assert resp.status_code == 200  # Returns empty list, not 404
+    data = resp.json()
+    assert data["total"] == 0
+    assert data["runs"] == []
 
 
 @pytest.mark.asyncio

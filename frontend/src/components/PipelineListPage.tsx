@@ -31,11 +31,11 @@ import {
   getPipelines,
   createPipeline,
   deletePipeline,
-  type PipelineResponse,
+  type PipelineListItem,
 } from '../api/pipelines';
 
 export function PipelinesPage() {
-  const [pipelines, setPipelines] = useState<PipelineResponse[]>([]);
+  const [pipelines, setPipelines] = useState<PipelineListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [createModalOpened, setCreateModalOpened] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
@@ -49,7 +49,7 @@ export function PipelinesPage() {
   const loadPipelines = useCallback(() => {
     setLoading(true);
     getPipelines()
-      .then((data) => setPipelines(Array.isArray(data) ? data : data.pipelines || []))
+      .then((data) => setPipelines(data))
       .catch((err) => {
         console.error('Failed to load pipelines:', err);
         notifications.show({
@@ -142,12 +142,8 @@ export function PipelinesPage() {
     []
   );
 
-  const rows = pipelines.map((pipeline) => {
-    const nodeCount = pipeline.graph_definition?.nodes?.length || 0;
-    const edgeCount = pipeline.graph_definition?.edges?.length || 0;
-
-    return (
-      <Table.Tr key={pipeline.id}>
+  const rows = pipelines.map((pipeline) => (
+      <Table.Tr key={pipeline.pipeline_id}>
         <Table.Td>
           <Text fw={500}>{pipeline.name}</Text>
           {pipeline.description && (
@@ -159,10 +155,10 @@ export function PipelinesPage() {
         <Table.Td>
           <Group gap="xs">
             <Badge variant="light" size="sm">
-              {nodeCount} nodes
+              {pipeline.node_count} nodes
             </Badge>
             <Badge variant="light" size="sm">
-              {edgeCount} edges
+              {pipeline.edge_count} edges
             </Badge>
           </Group>
         </Table.Td>
@@ -177,7 +173,7 @@ export function PipelinesPage() {
               variant="light"
               color="blue"
               size="sm"
-              onClick={() => handleEdit(pipeline.id)}
+              onClick={() => handleEdit(pipeline.pipeline_id)}
               title="Edit"
             >
               <IconEdit size={16} />
@@ -186,7 +182,7 @@ export function PipelinesPage() {
               variant="light"
               color="green"
               size="sm"
-              onClick={() => handleRun(pipeline.id)}
+              onClick={() => handleRun(pipeline.pipeline_id)}
               title="Run"
             >
               <IconPlayerPlay size={16} />
@@ -195,7 +191,7 @@ export function PipelinesPage() {
               variant="light"
               color="red"
               size="sm"
-              onClick={() => handleDelete(pipeline.id, pipeline.name)}
+              onClick={() => handleDelete(pipeline.pipeline_id, pipeline.name)}
               title="Delete"
             >
               <IconTrash size={16} />
@@ -203,8 +199,7 @@ export function PipelinesPage() {
           </Group>
         </Table.Td>
       </Table.Tr>
-    );
-  });
+    ));
 
   return (
     <Box style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>

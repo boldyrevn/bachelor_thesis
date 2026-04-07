@@ -1,4 +1,13 @@
-"""Validation utilities for node input/output schemas."""
+"""Validation utilities for node input/output schemas.
+
+Only the following types are allowed in node input_schema fields:
+- Primitives: str, int, float, bool
+- Custom strings: MultilineStr, DateStr, DateTimeStr
+- BaseConnection subclasses (PostgresConnection, S3Connection, etc.)
+- Optional[T] where T is any of the above
+
+Nested BaseModel is NOT allowed.
+"""
 
 import logging
 from typing import Annotated, Any, get_args, get_origin
@@ -10,24 +19,25 @@ from app.schemas.connection import BaseConnection
 logger = logging.getLogger(__name__)
 
 # Allowed primitive Python types
-_PRIMITIVE_TYPES = {str, int, float, bool, type(None)}
+_PRIMITIVE_TYPES = {str, int, float, bool}
 
-# The MultilineStr annotation marker (we detect by json_schema_extra format)
-_MULTILINE_FORMAT_KEY = "format"
-_MULTILINE_FORMAT_VALUE = "multiline"
+# Allowed format markers (Annotated[str, Field(format='...')])
+_ALLOWED_FORMATS = {"multiline", "date", "date-time"}
+
+# The annotation marker key
+_FORMAT_KEY = "format"
 
 
 def _is_connection_type(annotation: Any) -> bool:
     """Check if an annotation is a BaseConnection subclass."""
-    # Handle direct subclass references
     try:
         return isinstance(annotation, type) and issubclass(annotation, BaseConnection)
     except TypeError:
         return False
 
 
-def _is_multiline_str(annotation: Any) -> bool:
-    """Check if annotation is MultilineStr (Annotated[str, Field(format='multiline')])."""
+def _is_custom_str(annotation: Any) -> bool:
+    """Check if annotation is MultilineStr, DateStr, or DateTimeStr."""
     origin = get_origin(annotation)
     if origin is not Annotated:
         return False
@@ -36,15 +46,13 @@ def _is_multiline_str(annotation: Any) -> bool:
     if not args or args[0] is not str:
         return False
 
-    # Check for Field with format='multiline' in metadata
+    # Check for Field with format in metadata
     for meta in args[1:]:
         if hasattr(meta, "json_schema_extra") and isinstance(
             meta.json_schema_extra, dict
         ):
-            if (
-                meta.json_schema_extra.get(_MULTILINE_FORMAT_KEY)
-                == _MULTILINE_FORMAT_VALUE
-            ):
+            fmt = meta.json_schema_extra.get(_FORMAT_KEY)
+            if fmt in _ALLOWED_FORMATS:
                 return True
     return False
 
@@ -66,9 +74,8 @@ def validate_field_type(annotation: Any, field_name: str) -> list[str]:
 
     Allowed types:
     - Primitives: str, int, float, bool
-    - MultilineStr (Annotated[str, Field(format='multiline')])
+    - Custom strings: MultilineStr, DateStr, DateTimeStr
     - BaseConnection subclasses (PostgresConnection, S3Connection, etc.)
-    - Nested Pydantic BaseModel (recursively validated)
     - Optional[T] where T is any of the above
 
     Args:
@@ -89,28 +96,20 @@ def validate_field_type(annotation: Any, field_name: str) -> list[str]:
     if annotation in _PRIMITIVE_TYPES:
         return errors
 
-    # Check MultilineStr
-    if _is_multiline_str(annotation):
+    # Check custom string types (MultilineStr, DateStr, DateTimeStr)
+    if _is_custom_str(annotation):
         return errors
 
     # Check connection types
     if _is_connection_type(annotation):
         return errors
 
-    # Check nested BaseModel
-    try:
-        if isinstance(annotation, type) and issubclass(annotation, BaseModel):
-            # Recursively validate nested model
-            return validate_input_schema(annotation)
-    except TypeError:
-        pass
-
-    # If none of the above, it's not allowed
+    # Not allowed
     type_name = getattr(annotation, "__name__", str(annotation))
     errors.append(
         f"Field '{field_name}' has disallowed type '{type_name}'. "
-        f"Allowed: str, int, float, bool, MultilineStr, "
-        f"BaseConnection subclasses, or nested BaseModel"
+        f"Allowed: str, int, float, bool, MultilineStr, DateStr, "
+        f"DateTimeStr, BaseConnection subclasses"
     )
     return errors
 
