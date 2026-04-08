@@ -802,7 +802,7 @@
           "pipelines"
         ],
         "summary": "Run Pipeline",
-        "description": "Run pipeline synchronously.\n\nArgs:\n    pipeline_id: Logical pipeline UUID\n    parameters: Pipeline input parameters\n    db: Database session\n\nReturns:\n    Pipeline run result\n\nRaises:\n    HTTPException: If pipeline not found",
+        "description": "Run a pipeline asynchronously via the PipelineRunner background scheduler.\n\nCreates a PipelineRun record with status RUNNING and NodeRun records\nfor every node in the graph (status PENDING). The PipelineRunner\npolls the DB and picks up ready nodes automatically.\n\nArgs:\n    pipeline_id: Logical pipeline UUID\n    parameters: Pipeline input parameters\n    db: Database session\n\nReturns:\n    Created pipeline run (status will be RUNNING)\n\nRaises:\n    HTTPException: If pipeline not found",
         "operationId": "run_pipeline_api_v1_pipelines__pipeline_id__run_post",
         "parameters": [
           {
@@ -1013,7 +1013,7 @@
           "pipeline-runs"
         ],
         "summary": "Get Node Run Logs",
-        "description": "Get log contents for a specific node run.\n\nReads from log file on disk.\n\nArgs:\n    run_id: Pipeline run UUID\n    node_id: Node ID within the run\n    db: Database session\n\nReturns:\n    Log file contents",
+        "description": "Get log contents for a specific node run.\n\nReads from log file on disk.\nLog path: LOG_DIR/run_logs/<version_id>/<node_id>/<run_id>.log\n\nArgs:\n    run_id: Pipeline run UUID\n    node_id: Node ID within the run\n    db: Database session\n\nReturns:\n    Log file contents",
         "operationId": "get_node_run_logs_api_v1_pipelines_runs__run_id__nodes__node_id__logs_get",
         "parameters": [
           {

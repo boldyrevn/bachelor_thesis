@@ -3,14 +3,14 @@
 import os
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import get_db_session
 from app.core.config import settings
-from app.models.pipeline_version import PipelineVersion
-from app.models.pipeline_run import PipelineRun, RunStatus
 from app.models.node_run import NodeRun
+from app.models.pipeline_run import PipelineRun, RunStatus
+from app.models.pipeline_version import PipelineVersion
 
 router = APIRouter(prefix="/api/v1/pipelines", tags=["pipeline-runs"])
 
@@ -42,9 +42,9 @@ async def list_all_runs(
     )
     runs = result.scalars().all()
 
-    # Count total
-    count_result = await db.execute(select(PipelineRun.id))
-    total = len(count_result.scalars().all())
+    # Efficient count using COUNT(*)
+    count_result = await db.execute(select(func.count(PipelineRun.id)))
+    total = count_result.scalar() or 0
 
     # Collect version_ids to look up pipeline_ids
     version_ids = list({r.version_id for r in runs})
@@ -103,14 +103,14 @@ async def list_pipeline_runs(
     )
     runs = result.scalars().all()
 
-    # Count total
+    # Efficient count using COUNT(*)
     count_result = await db.execute(
-        select(PipelineRun.id).where(PipelineRun.version_id.in_(version_ids))
+        select(func.count(PipelineRun.id)).where(PipelineRun.version_id.in_(version_ids))
     )
-    total = len(count_result.scalars().all())
+    total = count_result.scalar() or 0
 
     return {
-        "runs": [_run_to_dict(run) for run in runs],
+        "runs": [_run_to_dict(run, pipeline_id=pipeline_id) for run in runs],
         "total": total,
     }
 
@@ -143,9 +143,15 @@ async def get_pipeline_run_detail(
     result = await db.execute(select(NodeRun).where(NodeRun.pipeline_run_id == run_id))
     node_runs = result.scalars().all()
 
+    # Look up pipeline_id from version for log path resolution
+    pv_result = await db.execute(
+        select(PipelineVersion.pipeline_id).where(PipelineVersion.id == run.version_id)
+    )
+    pipeline_id = pv_result.scalar_one_or_none()
+
     return {
-        "run": _run_to_dict(run),
-        "node_runs": [_node_run_to_dict(nr) for nr in node_runs],
+        "run": _run_to_dict(run, pipeline_id),
+        "node_runs": [_node_run_to_dict(nr, pipeline_id) for nr in node_runs],
     }
 
 
@@ -158,6 +164,7 @@ async def get_node_run_logs(
     """Get log contents for a specific node run.
 
     Reads from log file on disk.
+    Log path: LOG_DIR/run_logs/<version_id>/<node_id>/<run_id>.log
 
     Args:
         run_id: Pipeline run UUID
@@ -167,8 +174,20 @@ async def get_node_run_logs(
     Returns:
         Log file contents
     """
-    log_dir = settings.LOG_DIR
-    log_file = os.path.join(log_dir, run_id, f"{node_id}.log")
+    # Get version_id directly from the run record
+    run_result = await db.execute(
+        select(PipelineRun.version_id).where(PipelineRun.id == run_id)
+    )
+    version_id = run_result.scalar_one_or_none()
+    if not version_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Pipeline run '{run_id}' not found",
+        )
+
+    log_file = os.path.join(
+        settings.LOG_DIR, "run_logs", version_id, node_id, f"{run_id}.log"
+    )
 
     if not os.path.exists(log_file):
         raise HTTPException(
@@ -204,9 +223,9 @@ def _run_to_dict(run: PipelineRun, pipeline_id: str | None = None) -> dict:
     return result
 
 
-def _node_run_to_dict(nr: NodeRun) -> dict:
+def _node_run_to_dict(nr: NodeRun, pipeline_id: str | None = None) -> dict:
     """Convert NodeRun to dict."""
-    return {
+    result = {
         "id": nr.id,
         "pipeline_run_id": nr.pipeline_run_id,
         "node_id": nr.node_id,
@@ -215,8 +234,10 @@ def _node_run_to_dict(nr: NodeRun) -> dict:
         "output_values": nr.output_values,
         "started_at": nr.started_at.isoformat() if nr.started_at else None,
         "completed_at": nr.completed_at.isoformat() if nr.completed_at else None,
-        "error_message": nr.error_message,
     }
+    if pipeline_id:
+        result["pipeline_id"] = pipeline_id
+    return result
 
 
 __all__ = ["pipeline_runs_router", "global_runs_router"]

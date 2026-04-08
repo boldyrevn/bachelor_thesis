@@ -7,6 +7,11 @@ export const api = axios.create({
   headers: {
     'Content-Type': 'application/json',
   },
+  // Avoid stale connection issues in Docker by forcing a short timeout.
+  // The "Stalled" 20s delay in DevTools is caused by Docker bridge network
+  // silently dropping idle TCP connections. A fresh connection per request
+  // sidesteps this entirely.
+  timeout: 10000,
 });
 
 export interface HelloResponse {

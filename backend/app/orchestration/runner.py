@@ -6,49 +6,36 @@ This module provides:
 - Incremental node completion: Nodes finish individually, unblocking downstream nodes immediately
 - Crash recovery: On service restart, RUNNING runs are marked as FAILED
 
-Status transitions:
-    PipelineRun: Running → Done | Failed
-    NodeRun:   Pending → Ready → Running → Done | Failed
+Status transitions (uses model's RunStatus enum):
+    PipelineRun: Running → Success | Failed
+    NodeRun:   Pending → Running → Success | Failed
 """
 
 import asyncio
 import logging
+import os
+import sys
 from concurrent.futures import ProcessPoolExecutor
 from datetime import datetime
+from pathlib import Path
 from typing import Any
 
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
 from app.core.config import settings
+from app.core.logging_setup import setup_runner_logging
 from app.models.node_run import NodeRun
-from app.models.pipeline_run import PipelineRun
+from app.models.pipeline_run import PipelineRun, RunStatus
 from app.models.pipeline_version import PipelineVersion
 
 logger = logging.getLogger(__name__)
 
-
-# ---------------------------------------------------------------------------
-# Status enums (new scheme)
-# ---------------------------------------------------------------------------
-
-
-class PipelineRunStatus(str):
-    """Pipeline run has only 2 states: active or terminal."""
-
-    RUNNING = "running"
-    DONE = "done"
-    FAILED = "failed"
-
-
-class NodeRunStatus(str):
-    """Node run transitions: Pending → Ready → Running → Done | Failed."""
-
-    PENDING = "pending"
-    READY = "ready"
-    RUNNING = "running"
-    DONE = "done"
-    FAILED = "failed"
+# Status constants matching model's RunStatus enum
+STATUS_RUNNING = RunStatus.RUNNING.value
+STATUS_SUCCESS = RunStatus.SUCCESS.value
+STATUS_FAILED = RunStatus.FAILED.value
+STATUS_PENDING = RunStatus.PENDING.value
 
 
 # ---------------------------------------------------------------------------
@@ -123,15 +110,19 @@ class PipelineRunner:
 
     async def start(self) -> None:
         """Start the background polling loop."""
+        # Setup runner-specific logging (separate from FastAPI root logger)
+        setup_runner_logging(log_dir=settings.LOG_DIR)
+        logger.info("PipelineRunner starting...")
         # 1. Crash recovery — mark orphaned RUNNING as FAILED
         await self._recover_orphaned_runs()
 
         self._running = True
         self._background_task = asyncio.create_task(self._poll_loop())
-        logger.info("PipelineRunner started")
+        logger.info("PipelineRunner started (poll_interval=%.1fs)", self.poll_interval)
 
     async def stop(self) -> None:
         """Stop the background loop and wait for active tasks."""
+        logger.info("PipelineRunner stopping...")
         self._running = False
         if self._background_task:
             self._background_task.cancel()
@@ -160,6 +151,7 @@ class PipelineRunner:
 
     async def _poll_loop(self) -> None:
         """Main loop: runs every poll_interval seconds."""
+        logger.info("Poll loop started")
         while self._running:
             try:
                 await self._tick()
@@ -170,6 +162,9 @@ class PipelineRunner:
 
     async def _tick(self) -> None:
         """Single iteration of the poll loop."""
+        active_tasks = len(self._active_tasks)
+        logger.debug("Poll tick: active_tasks=%d", active_tasks)
+
         async with AsyncSession(self._engine) as session:
             # 1. Check completed tasks and update DB
             await self._process_completed_tasks(session)
@@ -187,9 +182,7 @@ class PipelineRunner:
         """On startup, mark RUNNING runs as FAILED (service was restarted)."""
         async with AsyncSession(self._engine) as session:
             result = await session.execute(
-                select(PipelineRun).where(
-                    PipelineRun.status == PipelineRunStatus.RUNNING
-                )
+                select(PipelineRun).where(PipelineRun.status == STATUS_RUNNING)
             )
             orphaned = result.scalars().all()
 
@@ -201,7 +194,7 @@ class PipelineRunner:
                     update(PipelineRun)
                     .where(PipelineRun.id.in_(ids))
                     .values(
-                        status=PipelineRunStatus.FAILED,
+                        status=STATUS_FAILED,
                         error_message="Service restarted — run was interrupted",
                         completed_at=datetime.utcnow(),
                     )
@@ -210,9 +203,9 @@ class PipelineRunner:
                 await session.execute(
                     update(NodeRun)
                     .where(NodeRun.pipeline_run_id.in_(ids))
-                    .where(NodeRun.status == NodeRunStatus.RUNNING)
+                    .where(NodeRun.status == STATUS_RUNNING)
                     .values(
-                        status=NodeRunStatus.FAILED,
+                        status=STATUS_FAILED,
                         completed_at=datetime.utcnow(),
                     )
                 )
@@ -227,7 +220,7 @@ class PipelineRunner:
         # Get Running pipeline runs, oldest first (FIFO scheduling)
         stmt = (
             select(PipelineRun)
-            .where(PipelineRun.status == PipelineRunStatus.RUNNING)
+            .where(PipelineRun.status == STATUS_RUNNING)
             .order_by(PipelineRun.started_at.asc())
         )
 
@@ -280,24 +273,24 @@ class PipelineRunner:
         pipeline_run: PipelineRun,
         graph_definition: dict[str, Any],
     ) -> list[NodeRun]:
-        """Find nodes whose upstream dependencies are all Done.
+        """Find nodes whose upstream dependencies are all Success.
 
-        A node transitions Pending → Ready when every node it depends on
-        has status = Done.
+        A node transitions Pending → Running when every node it depends on
+        has status = Success.
         """
         # Get all node runs for this pipeline run
         result = await session.execute(
             select(NodeRun)
             .where(NodeRun.pipeline_run_id == pipeline_run.id)
-            .where(NodeRun.status == NodeRunStatus.PENDING)
+            .where(NodeRun.status == STATUS_PENDING)
         )
         pending_nodes = result.scalars().all()
 
-        # Get Done node_ids
+        # Get Success node_ids
         result = await session.execute(
             select(NodeRun.node_id).where(
                 NodeRun.pipeline_run_id == pipeline_run.id,
-                NodeRun.status == NodeRunStatus.DONE,
+                NodeRun.status == STATUS_SUCCESS,
             )
         )
         done_node_ids = {row[0] for row in result.all()}
@@ -320,24 +313,24 @@ class PipelineRunner:
         node_run: NodeRun,
         graph_definition: dict[str, Any],
     ) -> None:
-        """Transition Pending → Ready → Running and submit to process pool."""
-        # Pending → Ready → Running (atomic transition)
-        node_run.status = NodeRunStatus.RUNNING
+        """Transition Pending → Running and submit to process pool."""
+        node_run.status = STATUS_RUNNING
         node_run.started_at = datetime.utcnow()
         await session.flush()
 
         # Get node config from graph_definition (not from NodeRun.output_values!)
         node_config = self._get_node_config(graph_definition, node_run.node_id)
 
-        # Resolve node config with upstream outputs
-        upstream_outputs = await self._get_upstream_outputs(
-            session, pipeline_run.id, node_run.node_id
-        )
-
         # Resolve connection references (UUID → BaseConnection objects) — in main process
         node_config = await self._resolve_connections(
             session, node_config, node_run.node_type
         )
+
+        # TODO: Resolve node config with upstream outputs (dependency resolution)
+        # upstream_outputs = await self._get_upstream_outputs(
+        #     session, pipeline_run.id, node_run.node_id
+        # )
+        upstream_outputs = {}
 
         # Submit to process pool — runs in separate process
         loop = asyncio.get_event_loop()
@@ -349,6 +342,7 @@ class PipelineRunner:
                 "node_id": node_run.node_id,
                 "node_config": node_config,
                 "pipeline_params": pipeline_run.parameters,
+                "version_id": pipeline_run.version_id,
                 "upstream_outputs": upstream_outputs,
                 "pipeline_run_id": pipeline_run.id,
             },
@@ -377,25 +371,25 @@ class PipelineRunner:
                 result = task.result()
 
                 if result.get("success"):
-                    # Running → Done
+                    # Running → Success
                     result_stmt = (
                         update(NodeRun)
                         .where(NodeRun.id == node_run_id)
                         .values(
-                            status=NodeRunStatus.DONE,
+                            status=STATUS_SUCCESS,
                             output_values=result.get("outputs", {}),
                             completed_at=datetime.utcnow(),
                         )
                     )
                     await session.execute(result_stmt)
-                    logger.info(f"Node {node_run_id} completed (Done)")
+                    logger.info(f"Node {node_run_id} completed (Success)")
                 else:
                     # Running → Failed
                     fail_stmt = (
                         update(NodeRun)
                         .where(NodeRun.id == node_run_id)
                         .values(
-                            status=NodeRunStatus.FAILED,
+                            status=STATUS_FAILED,
                             completed_at=datetime.utcnow(),
                         )
                     )
@@ -408,7 +402,7 @@ class PipelineRunner:
                     update(NodeRun)
                     .where(NodeRun.id == node_run_id)
                     .values(
-                        status=NodeRunStatus.FAILED,
+                        status=STATUS_FAILED,
                         completed_at=datetime.utcnow(),
                     )
                 )
@@ -417,13 +411,13 @@ class PipelineRunner:
 
             del self._active_tasks[node_run_id]
 
-        # Check if any pipeline runs have completed (all nodes Done or any Failed)
+        # Check if any pipeline runs have completed (all nodes Success or any Failed)
         await self._check_run_completion(session)
 
     async def _check_run_completion(self, session: AsyncSession) -> None:
         """Check if Running pipeline runs have all nodes finished."""
         result = await session.execute(
-            select(PipelineRun).where(PipelineRun.status == PipelineRunStatus.RUNNING)
+            select(PipelineRun).where(PipelineRun.status == STATUS_RUNNING)
         )
         running_runs = result.scalars().all()
 
@@ -432,7 +426,7 @@ class PipelineRunner:
             failed = await session.execute(
                 select(NodeRun).where(
                     NodeRun.pipeline_run_id == pipeline_run.id,
-                    NodeRun.status == NodeRunStatus.FAILED,
+                    NodeRun.status == STATUS_FAILED,
                 )
             )
             if failed.scalars().first():
@@ -441,7 +435,7 @@ class PipelineRunner:
                     update(PipelineRun)
                     .where(PipelineRun.id == pipeline_run.id)
                     .values(
-                        status=PipelineRunStatus.FAILED,
+                        status=STATUS_FAILED,
                         error_message="One or more nodes failed",
                         completed_at=datetime.utcnow(),
                     )
@@ -450,7 +444,7 @@ class PipelineRunner:
                 remaining = await session.execute(
                     select(NodeRun).where(
                         NodeRun.pipeline_run_id == pipeline_run.id,
-                        NodeRun.status == NodeRunStatus.RUNNING,
+                        NodeRun.status == STATUS_RUNNING,
                     )
                 )
                 for node in remaining.scalars().all():
@@ -463,7 +457,7 @@ class PipelineRunner:
                 logger.warning(f"Pipeline run {pipeline_run.id} failed")
                 continue
 
-            # Check if all nodes Done
+            # Check if all nodes Success
             all_nodes = await session.execute(
                 select(NodeRun).where(NodeRun.pipeline_run_id == pipeline_run.id)
             )
@@ -471,22 +465,19 @@ class PipelineRunner:
             if not nodes:
                 continue
 
-            all_done = all(n.status == NodeRunStatus.DONE for n in nodes)
-            any_terminal = all(
-                n.status in (NodeRunStatus.DONE, NodeRunStatus.FAILED) for n in nodes
-            )
+            all_success = all(n.status == STATUS_SUCCESS for n in nodes)
 
-            if any_terminal:
-                # Pipeline Done
+            if all_success:
+                # Pipeline Success
                 await session.execute(
                     update(PipelineRun)
                     .where(PipelineRun.id == pipeline_run.id)
                     .values(
-                        status=PipelineRunStatus.DONE,
+                        status=STATUS_SUCCESS,
                         completed_at=datetime.utcnow(),
                     )
                 )
-                logger.info(f"Pipeline run {pipeline_run.id} completed (Done)")
+                logger.info(f"Pipeline run {pipeline_run.id} completed (Success)")
 
     # ------------------------------------------------------------------
     # Helpers
@@ -501,7 +492,7 @@ class PipelineRunner:
         result = await session.execute(
             select(func.count(NodeRun.id)).where(
                 NodeRun.pipeline_run_id == pipeline_run_id,
-                NodeRun.status == NodeRunStatus.RUNNING,
+                NodeRun.status == STATUS_RUNNING,
             )
         )
         return result.scalar() or 0
@@ -509,7 +500,7 @@ class PipelineRunner:
     async def _get_upstream_outputs(
         self, session: AsyncSession, pipeline_run_id: str, node_id: str
     ) -> dict[str, dict[str, Any]]:
-        """Get outputs from upstream Done nodes for template resolution."""
+        """Get outputs from upstream Success nodes for template resolution."""
         from app.orchestration.graph_resolver import GraphResolver
 
         # Explicitly load pipeline version to get graph
@@ -534,12 +525,12 @@ class PipelineRunner:
 
         upstream_ids = [dep for dep in graph_node.dependencies]
 
-        # Get outputs from Done nodes
+        # Get outputs from Success nodes
         result = await session.execute(
             select(NodeRun).where(
                 NodeRun.pipeline_run_id == pipeline_run_id,
                 NodeRun.node_id.in_(upstream_ids),
-                NodeRun.status == NodeRunStatus.DONE,
+                NodeRun.status == STATUS_SUCCESS,
             )
         )
         done_nodes = result.scalars().all()
@@ -647,11 +638,111 @@ class PipelineRunner:
                 deps[target].append(source)
         return deps
 
+    # ------------------------------------------------------------------
+    # Subprocess logging helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _isolate_logging() -> None:
+        """Close all inherited logging handlers in a forked child.
+
+        ProcessPoolExecutor forks the child from the parent, inheriting all
+        logging handlers (server.log, runner.log, etc.).  Those handlers
+        have their own open() file descriptors that bypass os.dup2, so node
+        output would leak into server.log.  Close everything first.
+        """
+        root = logging.getLogger()
+        for handler in list(root.handlers):
+            try:
+                handler.close()
+            except Exception:
+                pass
+        root.handlers.clear()
+        root.setLevel(logging.WARNING)
+
+        for name in list(logging.Logger.manager.loggerDict):
+            lg = logging.getLogger(name)
+            for handler in list(lg.handlers):
+                try:
+                    handler.close()
+                except Exception:
+                    pass
+            lg.handlers.clear()
+            lg.propagate = False
+
+    @staticmethod
+    def _resolve_node_log_path(
+        version_id: str, node_id: str, pipeline_run_id: str
+    ) -> Path:
+        """Build the log file path: LOG_DIR/run_logs/<version_id>/<node_id>/<run_id>.log."""
+        log_dir = Path(settings.LOG_DIR) / "run_logs" / version_id / node_id
+        log_dir.mkdir(parents=True, exist_ok=True)
+        return log_dir / f"{pipeline_run_id}.log"
+
+    class _LogRedirect:
+        """Context manager that redirects stdout/stderr to a file via os.dup2.
+
+        Works at the OS level (fd 1 and fd 2), capturing everything:
+        python print(), subprocess output, logging module output, etc.
+        """
+
+        __slots__ = (
+            "log_file",
+            "_stdout_fd",
+            "_stderr_fd",
+            "_orig_stdout",
+            "_orig_stderr",
+            "log_f",
+        )
+
+        def __init__(self, log_file: Path) -> None:
+            self.log_file = log_file
+            self._stdout_fd = sys.stdout.fileno()
+            self._stderr_fd = sys.stderr.fileno()
+            self._orig_stdout: int | None = None
+            self._orig_stderr: int | None = None
+
+        def __enter__(self) -> "_LogRedirect":
+            # Save original file descriptors
+            self._orig_stdout = os.dup(self._stdout_fd)
+            self._orig_stderr = os.dup(self._stderr_fd)
+
+            # Open log file and redirect fd 1 and fd 2
+            self.log_f = open(self.log_file, "w", encoding="utf-8")
+            os.dup2(self.log_f.fileno(), self._stdout_fd)
+            os.dup2(self.log_f.fileno(), self._stderr_fd)
+
+            # Also redirect Python-level stdout/stderr
+            sys.stdout = os.fdopen(self._stdout_fd, "w")
+            sys.stderr = os.fdopen(self._stderr_fd, "w")
+
+            return self
+
+        def __exit__(self, *args: Any) -> None:
+            # Restore original stdout/stderr
+            sys.stdout.flush()
+            sys.stderr.flush()
+            if self._orig_stdout is not None:
+                os.dup2(self._orig_stdout, self._stdout_fd)
+                os.dup2(self._orig_stderr, self._stderr_fd)
+                os.close(self._orig_stdout)
+                os.close(self._orig_stderr)
+            self.log_f.close()
+
+            # Re-wrap Python file objects
+            sys.stdout = os.fdopen(os.dup(self._stdout_fd), "w")
+            sys.stderr = os.fdopen(os.dup(self._stderr_fd), "w")
+
+    # ------------------------------------------------------------------
+    # Node execution entry point
+    # ------------------------------------------------------------------
+
     @staticmethod
     def _execute_node_in_process(spec: dict[str, Any]) -> dict[str, Any]:
         """Execute a node in a separate process.
 
         Connections are already resolved in the main process before submission.
+        node_config is cast directly to the InputSchema type.
 
         Args:
             spec: Dict with node_type, node_id, node_config, pipeline_params,
@@ -660,10 +751,12 @@ class PipelineRunner:
         Returns:
             Dict with success, outputs, logs, error keys
         """
-        from app.core.template_resolver import resolve_dict_values
+        # 1. Logging isolation
+        PipelineRunner._isolate_logging()
+
+        # 2. Load node
         from app.nodes.registry import NodeRegistry
 
-        # Ensure registry is populated
         if not NodeRegistry.list_types():
             NodeRegistry.scan_nodes()
 
@@ -677,19 +770,41 @@ class PipelineRunner:
                 "error": f"Node '{spec['node_type']}' does not define input_schema",
             }
 
-        # Resolve Jinja2 templates + cast primitive types
-        # Connections are already resolved in the main process
-        resolved_config = resolve_dict_values(
-            spec["node_config"],
-            input_schema=node.input_schema,
-            params=spec["pipeline_params"],
-            upstream_outputs=spec["upstream_outputs"],
+        # 3. Resolve log path
+        log_file = PipelineRunner._resolve_node_log_path(
+            version_id=spec["version_id"],
+            node_id=spec["node_id"],
+            pipeline_run_id=spec["pipeline_run_id"],
         )
 
-        # Validate and execute via Pydantic
+        # 4. Run with redirected output
+        with PipelineRunner._LogRedirect(log_file):
+            return PipelineRunner._run_node_with_logging(spec, node)
+
+    @staticmethod
+    def _run_node_with_logging(spec: dict[str, Any], node) -> dict[str, Any]:
+        """Execute node logic with proper logging.
+
+        NOTE: By the time this runs, stdout has been redirected to the log file
+        by _LogRedirect (os.dup2).  Adding a StreamHandler(sys.stdout) sends
+        logging output into the same file.
+        """
+        # Create a real logger for the subprocess
+        node_logger = logging.getLogger(f"node.{spec['node_id']}")
+        node_logger.setLevel(logging.DEBUG)
+
+        # StreamHandler writes to sys.stdout — which _LogRedirect already
+        # redirected to the node's log file via os.dup2
+        file_handler = logging.StreamHandler(sys.stdout)
+        file_handler.setLevel(logging.DEBUG)
+        file_handler.setFormatter(
+            logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+        )
+        node_logger.addHandler(file_handler)
+
         try:
-            inputs = node.input_schema(**resolved_config)
-            output = node.execute(inputs, logger=None)
+            inputs = node.input_schema.model_validate(spec["node_config"])
+            output = node.execute(inputs, logger=node_logger)
 
             if node.output_schema is None:
                 return {

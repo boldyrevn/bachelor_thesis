@@ -13,6 +13,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.dependencies import get_db_session
+from app.models.node_run import NodeRun
+from app.models.pipeline_run import PipelineRun, PipelineRunResponse, RunStatus
 from app.models.pipeline_version import (
     PipelineVersion,
     PipelineVersionCreate,
@@ -20,8 +22,6 @@ from app.models.pipeline_version import (
     PipelineVersionUpdate,
     PipelineListItem,
 )
-from app.models.pipeline_run import PipelineRun, PipelineRunResponse, RunStatus
-from app.orchestration.pipeline_executor import execute_pipeline_with_streaming
 
 router = APIRouter(prefix="/api/v1/pipelines", tags=["pipelines"])
 
@@ -354,7 +354,11 @@ async def run_pipeline(
     parameters: dict[str, Any] | None = None,
     db: AsyncSession = Depends(get_db_session),
 ) -> PipelineRun:
-    """Run pipeline synchronously.
+    """Run a pipeline asynchronously via the PipelineRunner background scheduler.
+
+    Creates a PipelineRun record with status RUNNING and NodeRun records
+    for every node in the graph (status PENDING). The PipelineRunner
+    polls the DB and picks up ready nodes automatically.
 
     Args:
         pipeline_id: Logical pipeline UUID
@@ -362,7 +366,7 @@ async def run_pipeline(
         db: Database session
 
     Returns:
-        Pipeline run result
+        Created pipeline run (status will be RUNNING)
 
     Raises:
         HTTPException: If pipeline not found
@@ -382,6 +386,15 @@ async def run_pipeline(
             detail=f"Pipeline '{pipeline_id}' not found",
         )
 
+    graph = version.graph_definition
+    nodes = graph.get("nodes", [])
+
+    if not nodes:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Pipeline has no nodes",
+        )
+
     # Create pipeline run
     run_id = str(uuid.uuid4())
     pipeline_run = PipelineRun(
@@ -391,38 +404,25 @@ async def run_pipeline(
         parameters=parameters or {},
         started_at=datetime.utcnow(),
     )
-
     db.add(pipeline_run)
-    await db.commit()
 
-    # Execute pipeline
-    try:
-        # Get final result from async generator
-        final_result = None
-        async for _, result in execute_pipeline_with_streaming(
-            pipeline_id=pipeline_id,
+    # Create NodeRun records for every node (status PENDING)
+    for node in nodes:
+        node_id = node.get("id")
+        node_type = node.get("data", {}).get("nodeType") or node.get("data", {}).get(
+            "node_type"
+        )
+        if not node_id or not node_type:
+            continue
+
+        node_run = NodeRun(
             pipeline_run_id=run_id,
-            graph_definition=version.graph_definition,
-            pipeline_params=parameters or {},
-        ):
-            final_result = result
+            node_id=node_id,
+            node_type=node_type,
+            status=RunStatus.PENDING,
+        )
+        db.add(node_run)
 
-        # Update run status
-        if final_result and final_result.success:
-            pipeline_run.status = RunStatus.SUCCESS
-        else:
-            pipeline_run.status = RunStatus.FAILED
-            pipeline_run.error_message = (
-                final_result.error if final_result else "Unknown error"
-            )
-
-    except Exception as e:
-        pipeline_run.status = RunStatus.FAILED
-        pipeline_run.error_message = str(e)
-        await db.commit()
-        raise
-
-    pipeline_run.completed_at = datetime.utcnow()
     await db.commit()
     await db.refresh(pipeline_run)
 

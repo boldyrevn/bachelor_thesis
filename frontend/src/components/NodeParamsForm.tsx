@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Box,
   Text,
@@ -42,6 +42,48 @@ type FieldType =
   | 'dict'
   | 'list'
   | 'union';
+
+/**
+ * Safely convert a value to string for display, preserving falsy values like 0.
+ */
+function toDisplayString(value: unknown): string {
+  if (value === undefined || value === null) return '';
+  return String(value);
+}
+
+/**
+ * Get a sensible default value based on a JSON schema property.
+ * Used when creating new dict entries or list items so the value
+ * always matches the expected type.
+ */
+function getDefaultValue(schema: Record<string, unknown>): unknown {
+  // Check for explicit default in schema
+  if (schema.default !== undefined) return schema.default;
+
+  if (schema.type === 'null') return null;
+  if (schema.type === 'boolean') return false;
+  if (schema.type === 'integer') return 0;
+  if (schema.type === 'number') return 0;
+  if (schema.type === 'string') {
+    if (schema.format === 'date') return dayjs().format('YYYY-MM-DD');
+    if (schema.format === 'date-time') return dayjs().utc().format();
+    return '';
+  }
+  if (schema.type === 'object') return {};
+  if (schema.type === 'array') return [];
+
+  // anyOf with null (Optional[T]) — default to inner type's default
+  if (schema.anyOf && Array.isArray(schema.anyOf)) {
+    const nonNull = (schema.anyOf as Record<string, unknown>[]).filter(
+      (item) => item.type !== 'null',
+    );
+    if (nonNull.length > 0) return getDefaultValue(nonNull[0]);
+    return null;
+  }
+
+  // Fallback
+  return '';
+}
 
 /**
  * Resolve a $ref to its definition in $defs
@@ -267,7 +309,7 @@ function PrimitiveValueInput({
   if (format === 'multiline') {
     return (
       <Textarea
-        value={(value as string) || ''}
+        value={toDisplayString(value)}
         onChange={(e) => onChange(e.currentTarget.value)}
         size="xs"
         autosize
@@ -279,7 +321,7 @@ function PrimitiveValueInput({
 
   return (
     <TextInput
-      value={(value as string) || ''}
+      value={toDisplayString(value)}
       onChange={(e) => onChange(e.currentTarget.value)}
       size="xs"
     />
@@ -288,6 +330,18 @@ function PrimitiveValueInput({
 
 // ─── Dict field ────────────────────────────────────────────────────────────
 
+/** Counter for stable entry IDs */
+let nextEntryId = 0;
+
+/**
+ * Dict field that preserves insertion order regardless of JS's
+ * numeric-key sorting behavior in Object.entries().
+ *
+ * Uses a ref to track the display order of entries across renders.
+ * The value prop is always a plain object from the parent, but we
+ * maintain a stable ordering in a ref so re-ordering on re-render
+ * doesn't cause focus loss or UI jumps.
+ */
 function DictField({
   label,
   typeLabel,
@@ -307,15 +361,51 @@ function DictField({
   additionalProperties: Record<string, unknown>;
   defs: Record<string, JsonSchemaProperty>;
 }) {
+  // Ref tracks the known display order as a list of keys.
+  // This survives re-renders and prevents JS object key-sort reordering.
+  const orderRef = useRef<string[]>([]);
+
+  // Map from key → stable entry ID, also tracked via ref
+  const idMapRef = useRef<Map<string, string>>(new Map());
+
   const entries = useMemo(() => {
-    if (value && typeof value === 'object' && !Array.isArray(value)) {
-      return Object.entries(value as Record<string, unknown>);
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      orderRef.current = [];
+      idMapRef.current.clear();
+      return [];
     }
-    return [] as [string, unknown][];
+
+    const currentKeys = Object.keys(value as Record<string, unknown>);
+    const currentObj = value as Record<string, unknown>;
+
+    // Reconcile order: keep existing order, add new keys at end, remove deleted
+    const existingKeys = new Set(currentKeys);
+    const newOrder = orderRef.current.filter((k) => existingKeys.has(k));
+
+    // Add any new keys that aren't in our tracked order
+    for (const key of currentKeys) {
+      if (!newOrder.includes(key)) {
+        newOrder.push(key);
+        // Assign stable ID if not already present
+        if (!idMapRef.current.has(key)) {
+          idMapRef.current.set(key, `entry-${nextEntryId++}`);
+        }
+      }
+    }
+
+    orderRef.current = newOrder;
+
+    // Build entries from the stable order
+    return newOrder.map((key) => ({
+      key,
+      val: currentObj[key],
+      _id: idMapRef.current.get(key) ?? `entry-${nextEntryId++}`,
+    }));
   }, [value]);
 
   const addEntry = () => {
-    const newEntries = { ...(value as Record<string, unknown>) || {}, '': '' };
+    const defaultVal = getDefaultValue(additionalProperties as Record<string, unknown>);
+    const newEntries = { ...(value as Record<string, unknown>) || {}, '': defaultVal };
     onChange(newEntries);
   };
 
@@ -325,6 +415,19 @@ function DictField({
     const val = obj[oldKey];
     delete obj[oldKey];
     obj[newKey] = val;
+
+    // Update order ref: replace oldKey with newKey in place
+    const idx = orderRef.current.indexOf(oldKey);
+    if (idx !== -1) {
+      orderRef.current[idx] = newKey;
+    }
+    // Move stable ID to new key
+    const stableId = idMapRef.current.get(oldKey);
+    if (stableId) {
+      idMapRef.current.delete(oldKey);
+      idMapRef.current.set(newKey, stableId);
+    }
+
     onChange(obj);
   };
 
@@ -337,6 +440,11 @@ function DictField({
   const removeEntry = (key: string) => {
     const obj = { ...(value as Record<string, unknown>) };
     delete obj[key];
+
+    // Update refs
+    orderRef.current = orderRef.current.filter((k) => k !== key);
+    idMapRef.current.delete(key);
+
     onChange(obj);
   };
 
@@ -357,8 +465,8 @@ function DictField({
         </Badge>
       </Group>
       <Stack gap={4}>
-        {entries.map(([key, val], index) => (
-          <Group key={index} gap="xs" wrap="nowrap" align="flex-start">
+        {entries.map(({ key, val, _id }) => (
+          <Group key={_id} gap="xs" wrap="nowrap" align="flex-start">
             <TextInput
               value={key}
               onChange={(e) => updateKey(key, e.currentTarget.value)}
@@ -412,7 +520,8 @@ function ListField({
   }, [value]);
 
   const addItem = () => {
-    onChange([...items, '']);
+    const defaultVal = getDefaultValue(itemsSchema as Record<string, unknown>);
+    onChange([...items, defaultVal]);
   };
 
   const updateItem = (index: number, newVal: unknown) => {
@@ -880,7 +989,7 @@ function FormField({
           <Badge size="xs" variant="light">{typeLabel}</Badge>
         </Group>
         <Textarea
-          value={(value as string) || ''}
+          value={toDisplayString(value)}
           onChange={(e) => onChange(e.currentTarget.value)}
           placeholder={property.default?.toString()}
           autosize
@@ -936,7 +1045,7 @@ function FormField({
         <Badge size="xs" variant="light">{typeLabel}</Badge>
       </Group>
       <TextInput
-        value={(value as string) || ''}
+        value={toDisplayString(value)}
         onChange={(e) => onChange(e.currentTarget.value)}
         placeholder={property.default?.toString()}
         size="sm"

@@ -377,6 +377,8 @@ function PipelineEditorWithContext() {
 
   useRegisterHeaderAction(saveButton);
 
+  const [isRunning, setIsRunning] = useState(false);
+
   // Run button for header (only visible when editing existing pipeline)
   const runButton = useMemo(() => {
     if (!pipelineId) return null;
@@ -386,17 +388,10 @@ function PipelineEditorWithContext() {
         leftSection={<IconPlayerPlay size={16} />}
         size="sm"
         color="green"
+        loading={isRunning}
         onClick={async () => {
           try {
-            // Save first
-            const graphDefinition = buildGraphDefinition();
-            await updatePipeline(pipelineId, {
-              name: formValuesRef.current.name,
-              description: formValuesRef.current.description || undefined,
-              graph_definition: graphDefinition,
-            });
-
-            // Run pipeline
+            setIsRunning(true);
             const response = await api.post(
               `/api/v1/pipelines/${pipelineId}/run`,
               { parameters: {} }
@@ -404,9 +399,9 @@ function PipelineEditorWithContext() {
             const runId = response.data.id;
 
             notifications.show({
-              title: 'Run Complete',
-              message: 'Pipeline execution finished',
-              color: 'green',
+              title: 'Run Started',
+              message: 'Pipeline execution is running...',
+              color: 'blue',
             });
 
             navigate(`/pipelines/${pipelineId}/runs/${runId}`);
@@ -417,13 +412,15 @@ function PipelineEditorWithContext() {
               message: String(detail || error?.message || 'Unknown error').substring(0, 200),
               color: 'red',
             });
+          } finally {
+            setIsRunning(false);
           }
         }}
       >
         Run
       </Button>
     );
-  }, [pipelineId, buildGraphDefinition, navigate]);
+  }, [pipelineId, isRunning, navigate]);
 
   // Combine save + run buttons into a single registration
   // to avoid useRegisterHeaderAction(null) overwriting saveButton

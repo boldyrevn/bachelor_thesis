@@ -27,6 +27,13 @@
             "target": "all_types_test",
             "source_handle": "source-bottom",
             "target_handle": "target-top"
+        },
+        {
+            "id": "xy-edge__all_types_testsource-bottom-all_types_test_1target-top",
+            "source": "all_types_test",
+            "target": "all_types_test_1",
+            "source_handle": "source-bottom",
+            "target_handle": "target-top"
         }
     ],
     "nodes": [
@@ -113,11 +120,12 @@
                     "required_string": "фвыаф",
                     "string_to_int_dict": {
                         "f2f23": "",
-                        "авпа": 234
+                        "авпа": 234,
+                        "мсчм": 0
                     },
                     "string_to_float_dict": {
-                        "ва": "",
-                        "ацуа": ""
+                        "пк3п": 0,
+                        "фыва": 0
                     }
                 },
                 "nodeType": "all_types_test"
@@ -126,6 +134,40 @@
             "position": {
                 "x": 399.2305060234455,
                 "y": 790.3971769860606
+            }
+        },
+        {
+            "id": "all_types_test_1",
+            "data": {
+                "label": "all_types_test_1",
+                "config": {
+                    "date_field": "2026-04-01",
+                    "required_int": 234,
+                    "datetime_field": "2026-04-21T03:45:00Z",
+                    "required_string": "sfgds",
+                    "string_to_int_dict": {
+                        "3": 0,
+                        "23": 0,
+                        "dsg5": 0,
+                        "fwef": 0,
+                        "gdfg": 435,
+                        "fasdf": 0,
+                        "уцкцук": 0
+                    },
+                    "string_to_float_dict": {
+                        "": 0,
+                        "gs": 0,
+                        "gdf": 35,
+                        "fgdg": 23,
+                        "fdhfdg": 0
+                    }
+                },
+                "nodeType": "all_types_test"
+            },
+            "type": "all_types_test",
+            "position": {
+                "x": 555.1652162182136,
+                "y": 898.7329767948889
             }
         }
     ]

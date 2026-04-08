@@ -1,34 +1,21 @@
 """FlowForge orchestration module.
 
-Provides pipeline execution, graph resolution, and node orchestration.
+Provides node execution, graph resolution, and pipeline orchestration.
 """
 
-from .executor import NodeExecutor, execute_node_local, get_default_executor
 from .graph_resolver import (
     GraphResolver,
     ResolvedGraph,
     get_execution_order,
     validate_pipeline_graph,
 )
-from .pipeline_executor import (
-    PipelineExecutionContext,
-    PipelineExecutor,
-    PipelineExecutionResult,
-    execute_pipeline,
-    execute_pipeline_with_streaming,
-)
+from .runner import PipelineRunner, get_runner
 
 __all__ = [
-    "NodeExecutor",
-    "execute_node_local",
-    "get_default_executor",
     "GraphResolver",
     "ResolvedGraph",
     "get_execution_order",
     "validate_pipeline_graph",
-    "PipelineExecutor",
-    "PipelineExecutionContext",
-    "PipelineExecutionResult",
-    "execute_pipeline",
-    "execute_pipeline_with_streaming",
+    "PipelineRunner",
+    "get_runner",
 ]

@@ -15,8 +15,10 @@ from app.api.demo import demo_router
 from app.api.node_types import node_types_router
 from app.api.pipeline_runs import pipeline_runs_router, global_runs_router
 from app.api.pipelines import pipelines_router
-from app.core.config import settings, setup_logging
+from app.core.config import settings
+from app.core.logging_setup import setup_server_logging
 from app.models.base import Base
+from app.orchestration.runner import get_runner
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +34,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     global db_session_factory, db_engine
 
     # Startup
-    setup_logging(debug=settings.DEBUG)
+    setup_server_logging(log_dir=settings.LOG_DIR, level=logging.DEBUG if settings.DEBUG else logging.INFO)
 
     # Create engine and session factory
     db_engine = create_async_engine(
@@ -76,9 +78,18 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     with open(openapi_path, "w") as f:
         json.dump(openapi_spec, f, indent=2)
 
+    # Start PipelineRunner background scheduler
+    runner = get_runner()
+    await runner.start()
+    logger.info("PipelineRunner started (background scheduler)")
+
     yield
 
     # Shutdown
+    runner = get_runner()
+    await runner.stop()
+    logger.info("PipelineRunner stopped")
+
     if db_engine:
         await db_engine.dispose()
 

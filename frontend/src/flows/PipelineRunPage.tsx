@@ -539,14 +539,6 @@ function PipelineRunPageWithContext() {
                     </Stack>
                   </>
                 )}
-
-                {selectedNodeRun?.error_message && (
-                  <>
-                    <Divider my="md" />
-                    <Text size="xs" c="red" fw={500}>Error</Text>
-                    <Text size="xs" c="red">{selectedNodeRun.error_message}</Text>
-                  </>
-                )}
               </Box>
             ) : nodes.length > 0 ? (
               <Box style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
