@@ -9,7 +9,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.node_type import NodeType
 from app.nodes.base import BaseNode
 from app.nodes.registry import NodeRegistry
-from app.schemas.node_input_validation import validate_input_schema
+from app.schemas.node_input_validation import (
+    validate_input_schema,
+    validate_output_schema,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -144,6 +147,14 @@ class NodeScanner:
             raise ValueError(
                 f"Node '{node_class.node_type}' has invalid input_schema: "
                 + "; ".join(validation_errors)
+            )
+
+        # Validate output schema field types
+        output_validation_errors = validate_output_schema(node_class.output_schema)
+        if output_validation_errors:
+            raise ValueError(
+                f"Node '{node_class.node_type}' has invalid output_schema: "
+                + "; ".join(output_validation_errors)
             )
 
         # Extract schemas as JSON

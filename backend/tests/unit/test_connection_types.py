@@ -2,7 +2,8 @@
 
 import pytest
 from pydantic import BaseModel, Field
-from typing import Any as AnyType, Optional
+from typing import Any as AnyType, Optional, Union
+from typing import Dict, List
 
 from app.schemas.connection import (
     Secret,
@@ -19,6 +20,8 @@ from app.schemas.node_types import MultilineStr
 from app.schemas.node_input_validation import (
     validate_field_type,
     validate_input_schema,
+    validate_output_schema,
+    validate_output_schema_field,
 )
 
 
@@ -271,3 +274,313 @@ class TestInputSchemaValidation:
 
         errors = validate_input_schema(EmptyInput)
         assert errors == []
+
+
+# =============================================================================
+# Output Schema Validation Tests
+# =============================================================================
+
+
+class TestOutputSchemaValidation:
+    """Tests for node output_schema validation.
+
+    Output schemas cannot contain BaseConnection subclasses because
+    connections should be selected per-node, not passed as artifacts.
+    """
+
+    def test_primitives_valid_in_output(self):
+        class SimpleOutput(BaseModel):
+            text: str
+            count: int
+            ratio: float
+            enabled: bool
+
+        errors = validate_output_schema(SimpleOutput)
+        assert errors == []
+
+    def test_optional_primitives_valid_in_output(self):
+        class OptionalOutput(BaseModel):
+            text: Optional[str] = None
+            count: Optional[int] = None
+
+        errors = validate_output_schema(OptionalOutput)
+        assert errors == []
+
+    def test_postgres_connection_rejected_in_output(self):
+        class BadOutput(BaseModel):
+            connection: PostgresConnection
+
+        errors = validate_output_schema(BadOutput)
+        assert len(errors) == 1
+        assert "PostgresConnection" in errors[0]
+        assert "not allowed in output_schema" in errors[0]
+
+    def test_s3_connection_rejected_in_output(self):
+        class BadOutput(BaseModel):
+            s3_conn: S3Connection
+
+        errors = validate_output_schema(BadOutput)
+        assert len(errors) == 1
+        assert "S3Connection" in errors[0]
+
+    def test_spark_connection_rejected_in_output(self):
+        class BadOutput(BaseModel):
+            spark_conn: SparkConnection
+
+        errors = validate_output_schema(BadOutput)
+        assert len(errors) == 1
+        assert "SparkConnection" in errors[0]
+
+    def test_optional_connection_rejected_in_output(self):
+        class BadOutput(BaseModel):
+            conn: Optional[PostgresConnection] = None
+
+        errors = validate_output_schema(BadOutput)
+        assert len(errors) == 1
+        assert "PostgresConnection" in errors[0]
+
+    def test_multiple_connection_fields_rejected(self):
+        class BadOutput(BaseModel):
+            pg: PostgresConnection
+            s3: S3Connection
+
+        errors = validate_output_schema(BadOutput)
+        assert len(errors) == 2
+        assert "PostgresConnection" in errors[0]
+        assert "S3Connection" in errors[1]
+
+    def test_connection_field_validation_error_message(self):
+        class BadOutput(BaseModel):
+            db_conn: PostgresConnection
+
+        errors = validate_output_schema_field(PostgresConnection, "db_conn")
+        assert len(errors) == 1
+        assert "'db_conn'" in errors[0]
+        assert "PostgresConnection" in errors[0]
+        assert "selected per-node" in errors[0]
+
+    def test_empty_output_schema_valid(self):
+        class EmptyOutput(BaseModel):
+            pass
+
+        errors = validate_output_schema(EmptyOutput)
+        assert errors == []
+
+
+# =============================================================================
+# Dict / List / Union Validation Tests
+# =============================================================================
+
+
+class TestDictListUnionValidation:
+    """Tests for dict, list, and Union type validation in input/output schemas."""
+
+    # --- Valid dict types ---
+
+    def test_dict_str_int_valid(self):
+        class DictInput(BaseModel):
+            mapping: Dict[str, int]
+
+        errors = validate_input_schema(DictInput)
+        assert errors == []
+
+    def test_dict_str_str_output_valid(self):
+        class DictOutput(BaseModel):
+            mapping: Dict[str, str]
+
+        errors = validate_output_schema(DictOutput)
+        assert errors == []
+
+    def test_dict_str_float_valid(self):
+        class DictInput(BaseModel):
+            values: Dict[str, float]
+
+        errors = validate_input_schema(DictInput)
+        assert errors == []
+
+    def test_dict_str_bool_valid(self):
+        class DictInput(BaseModel):
+            flags: Dict[str, bool]
+
+        errors = validate_input_schema(DictInput)
+        assert errors == []
+
+    def test_dict_str_multiline_str_valid(self):
+        class DictInput(BaseModel):
+            queries: Dict[str, MultilineStr]
+
+        errors = validate_input_schema(DictInput)
+        assert errors == []
+
+    def test_dict_str_optional_value_valid(self):
+        class DictInput(BaseModel):
+            data: Dict[str, str]
+
+        errors = validate_input_schema(DictInput)
+        assert errors == []
+
+    # --- Valid list types ---
+
+    def test_list_str_valid(self):
+        class ListInput(BaseModel):
+            items: List[str]
+
+        errors = validate_input_schema(ListInput)
+        assert errors == []
+
+    def test_list_int_valid(self):
+        class ListInput(BaseModel):
+            numbers: List[int]
+
+        errors = validate_input_schema(ListInput)
+        assert errors == []
+
+    def test_list_float_output_valid(self):
+        class ListOutput(BaseModel):
+            scores: List[float]
+
+        errors = validate_output_schema(ListOutput)
+        assert errors == []
+
+    def test_list_bool_valid(self):
+        class ListInput(BaseModel):
+            flags: List[bool]
+
+        errors = validate_input_schema(ListInput)
+        assert errors == []
+
+    def test_optional_dict_valid(self):
+        class Input(BaseModel):
+            mapping: Optional[Dict[str, str]] = None
+
+        errors = validate_input_schema(Input)
+        assert errors == []
+
+    def test_optional_list_valid(self):
+        class Input(BaseModel):
+            items: Optional[List[int]] = None
+
+        errors = validate_input_schema(Input)
+        assert errors == []
+
+    # --- Valid Union types ---
+
+    def test_union_str_int_valid(self):
+        class UnionInput(BaseModel):
+            value: Union[str, int]
+
+        errors = validate_input_schema(UnionInput)
+        assert errors == []
+
+    def test_union_str_list_valid(self):
+        class UnionInput(BaseModel):
+            value: Union[str, List[str]]
+
+        errors = validate_input_schema(UnionInput)
+        assert errors == []
+
+    def test_union_str_dict_valid(self):
+        class UnionInput(BaseModel):
+            value: Union[str, Dict[str, int]]
+
+        errors = validate_input_schema(UnionInput)
+        assert errors == []
+
+    def test_union_int_float_list_valid(self):
+        class UnionInput(BaseModel):
+            value: Union[int, float, List[str]]
+
+        errors = validate_input_schema(UnionInput)
+        assert errors == []
+
+    def test_union_str_int_output_valid(self):
+        class UnionOutput(BaseModel):
+            value: Union[str, int]
+
+        errors = validate_output_schema(UnionOutput)
+        assert errors == []
+
+    def test_union_dict_list_output_valid(self):
+        class UnionOutput(BaseModel):
+            value: Union[Dict[str, str], List[int]]
+
+        errors = validate_output_schema(UnionOutput)
+        assert errors == []
+
+    # --- Rejected: Connection in dict ---
+
+    def test_dict_str_connection_rejected(self):
+        class BadInput(BaseModel):
+            conns: Dict[str, PostgresConnection]
+
+        errors = validate_input_schema(BadInput)
+        assert len(errors) == 1
+        assert "PostgresConnection" in errors[0]
+
+    # --- Rejected: Connection in list ---
+
+    def test_list_connection_rejected(self):
+        class BadInput(BaseModel):
+            conns: List[S3Connection]
+
+        errors = validate_input_schema(BadInput)
+        assert len(errors) == 1
+        assert "S3Connection" in errors[0]
+
+    # --- Rejected: Connection in Union ---
+
+    def test_union_with_connection_rejected(self):
+        class BadInput(BaseModel):
+            value: Union[str, PostgresConnection]
+
+        errors = validate_input_schema(BadInput)
+        assert len(errors) == 1
+        assert "PostgresConnection" in errors[0]
+
+    # --- Rejected: Nested dict/list ---
+
+    def test_nested_dict_rejected(self):
+        class BadInput(BaseModel):
+            nested: Dict[str, Dict[str, str]]
+
+        errors = validate_input_schema(BadInput)
+        assert len(errors) == 1
+        assert "dict" in errors[0].lower()
+
+    def test_nested_list_rejected(self):
+        class BadInput(BaseModel):
+            nested: List[List[str]]
+
+        errors = validate_input_schema(BadInput)
+        assert len(errors) == 1
+        assert "list" in errors[0].lower()
+
+    def test_dict_with_list_value_rejected(self):
+        class BadInput(BaseModel):
+            data: Dict[str, List[str]]
+
+        errors = validate_input_schema(BadInput)
+        assert len(errors) == 1
+        assert "list" in errors[0].lower()
+
+    # --- Rejected: BaseModel in dict/list ---
+
+    def test_dict_with_basemodel_rejected(self):
+        class SubModel(BaseModel):
+            name: str
+
+        class BadInput(BaseModel):
+            items: Dict[str, SubModel]
+
+        errors = validate_input_schema(BadInput)
+        assert len(errors) == 1
+
+    def test_list_with_basemodel_rejected(self):
+        class SubModel(BaseModel):
+            name: str
+
+        class BadInput(BaseModel):
+            items: List[SubModel]
+
+        errors = validate_input_schema(BadInput)
+        assert len(errors) == 1

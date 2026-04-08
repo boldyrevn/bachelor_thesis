@@ -72,7 +72,7 @@ function getTypeLabel(schemaType: string): string {
     integer: 'int',
     number: 'float',
     boolean: 'bool',
-    object: 'object',
+    object: 'dict',
     array: 'list',
   };
   return typeMap[schemaType] || schemaType;
@@ -110,40 +110,66 @@ function isConnectionType(
 }
 
 /**
- * Check if a property is a multiline string
- */
-function isMultilineString(propSchema: Record<string, unknown>): boolean {
-  return (propSchema['format'] as string) === 'multiline';
-}
-
-/**
- * Build a human-readable type label including connection type info
- * Uses Python-style type names: str, int, float, bool
+ * Build a human-readable type label including connection type info and nested types.
+ * Handles: primitives, custom strings, connections, dict, list, Union.
+ * Uses Python-style type names: str, int, float, bool, dict, list, Union
  */
 function buildTypeLabel(
   propSchema: Record<string, unknown>,
   rootSchema?: Record<string, unknown>,
 ): string {
+  // Connection type (direct marker or $ref)
   const connType = isConnectionType(propSchema, rootSchema);
   if (connType) {
-    // Return the actual class name from $defs if available
     const allOf = propSchema.allOf as Record<string, unknown>[] | undefined;
     if (allOf?.length) {
       for (const item of allOf) {
         const ref = item.$ref as string | undefined;
         if (ref?.startsWith('#/$defs/')) {
           const defName = ref.replace('#/$defs/', '');
-          return defName; // e.g., "PostgresConnection"
+          return defName;
         }
       }
     }
     return `${connType} Connection`;
   }
 
-  if (isMultilineString(propSchema)) {
-    return 'str (multiline)';
+  // Custom string formats
+  const format = propSchema.format as string | undefined;
+  if (format === 'multiline') return 'str (multiline)';
+  if (format === 'date') return 'date';
+  if (format === 'date-time') return 'datetime';
+
+  // dict[str, T] — type: "object" with additionalProperties
+  if (propSchema.type === 'object' && propSchema.additionalProperties) {
+    const valueSchema = propSchema.additionalProperties as Record<string, unknown>;
+    const valueLabel = buildTypeLabel(valueSchema, rootSchema);
+    return `dict[str, ${valueLabel}]`;
   }
 
+  // list[T] — type: "array" with items
+  if (propSchema.type === 'array' && propSchema.items) {
+    const itemSchema = propSchema.items as Record<string, unknown>;
+    const itemLabel = buildTypeLabel(itemSchema, rootSchema);
+    return `list[${itemLabel}]`;
+  }
+
+  // Union[A, B, ...] — anyOf
+  if (propSchema.anyOf && Array.isArray(propSchema.anyOf)) {
+    // Filter out null (Optional)
+    const nonNull = (propSchema.anyOf as Record<string, unknown>[]).filter(
+      (s) => s.type !== 'null',
+    );
+    if (nonNull.length === 0) return 'null';
+    if (nonNull.length === 1) {
+      // Optional[T] — just show T (optionality conveyed by absence of "REQUIRED" badge)
+      return buildTypeLabel(nonNull[0], rootSchema);
+    }
+    const labels = nonNull.map((s) => buildTypeLabel(s, rootSchema));
+    return `Union[${labels.join(', ')}]`;
+  }
+
+  // Primitive type
   return getTypeLabel(propSchema.type as string);
 }
 
@@ -209,7 +235,7 @@ export function AddNodeDialog({ opened, onClose, onAdd, existingNodeIds }: AddNo
 
     if (customName.trim()) {
       // Custom name provided — validate it
-      const error = validateNodeName(customName.trim());
+      const error = validateNodeName(customName.trim(), existingNodeIds);
       if (error) return; // Don't add if validation fails
       displayName = customName.trim();
     } else {
@@ -332,10 +358,19 @@ export function AddNodeDialog({ opened, onClose, onAdd, existingNodeIds }: AddNo
                 {/* Input parameters summary (read-only) */}
                 {Object.keys(selectedNodeType.input_schema.properties || {}).length > 0 && (
                   <Box>
-                    <Text fw={600} size="sm" mb="xs">
-                      Входные параметры
-                    </Text>
-                    <Stack gap={6}>
+                    <Box
+                      p="sm"
+                      mb="xs"
+                      style={{
+                        borderBottom: '1px solid #dee2e6',
+                        backgroundColor: '#f1f3f5',
+                      }}
+                    >
+                      <Text fw={700} size="sm" c="dark">
+                        Входные параметры
+                      </Text>
+                    </Box>
+                    <Stack gap={6} px="sm" pb="sm">
                       {Object.entries(selectedNodeType.input_schema.properties).map(
                         ([paramName, propSchema]) => {
                           const schema = propSchema as Record<string, unknown>;

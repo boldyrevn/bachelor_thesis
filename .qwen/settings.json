@@ -50,7 +50,15 @@
       "Bash(python3 *)",
       "Bash(docker compose up *)",
       "Bash(docker compose restart *)",
-      "Bash(../.venv/bin/python *)"
+      "Bash(../.venv/bin/python *)",
+      "Bash(from *)",
+      "Bash(import *)",
+      "Bash(class)",
+      "Bash(q: *)",
+      "Bash(d: *)",
+      "Bash(dt: *)",
+      "Bash(print)",
+      "Bash(eof)"
     ]
   },
   "$version": 3

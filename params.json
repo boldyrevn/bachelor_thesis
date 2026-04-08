@@ -13,6 +13,20 @@
             "target": "text_output_1",
             "source_handle": "source-bottom",
             "target_handle": "target-top"
+        },
+        {
+            "id": "xy-edge__text_output_1source-bottom-multiply_two_numberstarget-top",
+            "source": "text_output_1",
+            "target": "multiply_two_numbers",
+            "source_handle": "source-bottom",
+            "target_handle": "target-top"
+        },
+        {
+            "id": "xy-edge__multiply_two_numberssource-bottom-all_types_testtarget-top",
+            "source": "multiply_two_numbers",
+            "target": "all_types_test",
+            "source_handle": "source-bottom",
+            "target_handle": "target-top"
         }
     ],
     "nodes": [
@@ -59,6 +73,59 @@
             "position": {
                 "x": 333.53098435963875,
                 "y": 615.5089779479672
+            }
+        },
+        {
+            "id": "multiply_two_numbers",
+            "data": {
+                "label": "multiply_two_numbers",
+                "config": {
+                    "a": 34,
+                    "b": 23.2532
+                },
+                "nodeType": "multiply_two_numbers"
+            },
+            "type": "multiply_two_numbers",
+            "position": {
+                "x": 540.5482101758818,
+                "y": 616.4597668844191
+            }
+        },
+        {
+            "id": "all_types_test",
+            "data": {
+                "label": "all_types_test",
+                "config": {
+                    "date_field": "2026-04-09",
+                    "str_or_int": "",
+                    "required_int": 34,
+                    "complex_union": "",
+                    "datetime_field": "2026-04-22T03:45:00Z",
+                    "list_of_floats": [
+                        2345245.2352
+                    ],
+                    "optional_union": null,
+                    "list_of_strings": [
+                        "ыфваа",
+                        "asdf",
+                        "243dgg4g"
+                    ],
+                    "required_string": "фвыаф",
+                    "string_to_int_dict": {
+                        "f2f23": "",
+                        "авпа": 234
+                    },
+                    "string_to_float_dict": {
+                        "ва": "",
+                        "ацуа": ""
+                    }
+                },
+                "nodeType": "all_types_test"
+            },
+            "type": "all_types_test",
+            "position": {
+                "x": 399.2305060234455,
+                "y": 790.3971769860606
             }
         }
     ]

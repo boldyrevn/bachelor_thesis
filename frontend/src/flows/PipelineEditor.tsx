@@ -32,14 +32,17 @@ import {
   Text,
   Button,
   Group,
+  Stack,
   ActionIcon,
   Badge,
   ScrollArea,
   TextInput,
   Modal,
+  Code,
+  Tooltip,
 } from '@mantine/core';
 import { useForm } from '@mantine/form';
-import { IconPlus, IconCube, IconX, IconDeviceFloppy, IconPlayerPlay } from '@tabler/icons-react';
+import { IconPlus, IconCube, IconX, IconDeviceFloppy, IconPlayerPlay, IconInfoCircle } from '@tabler/icons-react';
 import { notifications } from '@mantine/notifications';
 import { ResizeHandle } from './ResizeHandle';
 import { FlowNode } from './nodes/FlowNode';
@@ -563,6 +566,10 @@ function PipelineEditorWithContext() {
 
   const selectedNode = nodes.find((n) => n.id === selectedNodeId);
 
+  // Output variables section for the selected node
+  const outputSchema = nodeTypeSchema?.output_schema;
+  const hasOutputSchema = outputSchema && Object.keys(outputSchema.properties || {}).length > 0;
+
   return (
     <Box style={{ display: 'flex', height: '100%' }}>
       {/* Left panel: Pipeline Parameters + Version Selector */}
@@ -707,38 +714,88 @@ function PipelineEditorWithContext() {
           </Box>
 
           <ScrollArea style={{ flex: 1 }}>
-            <Box p="sm">
-              {selectedNode ? (
-                <Box>
-                  <Group justify="space-between" wrap="nowrap" mb="xs">
-                    <Box style={{ minWidth: 0, flex: 1 }}>
-                      <Text fw={600} size="sm" lineClamp={2}>
-                        {selectedNode.data.label}
-                      </Text>
-                    </Box>
-                    <ActionIcon
-                      variant="subtle"
-                      size="sm"
-                      onClick={() => selectNode(null)}
-                      style={{ flexShrink: 0 }}
-                    >
-                      <IconX size={14} />
-                    </ActionIcon>
-                  </Group>
-                  <Badge size="sm" variant="light">
-                    {selectedNode.data.nodeType}
-                  </Badge>
+            {selectedNode ? (
+              <Box style={{ display: 'flex', flexDirection: 'column' }}>
+                {/* Node title + badge + close button */}
+                <Box p="sm">
+                  <Box pb="xs">
+                    <Group justify="space-between" wrap="nowrap" mb="xs">
+                      <Box style={{ minWidth: 0, flex: 1 }}>
+                        <Text fw={600} size="sm" lineClamp={2}>
+                          {selectedNode.data.label}
+                        </Text>
+                      </Box>
+                      <ActionIcon
+                        variant="subtle"
+                        size="sm"
+                        onClick={() => selectNode(null)}
+                        style={{ flexShrink: 0 }}
+                      >
+                        <IconX size={14} />
+                      </ActionIcon>
+                    </Group>
+                    <Badge size="sm" variant="light">
+                      {selectedNode.data.nodeType}
+                    </Badge>
+                  </Box>
+                  {/* Input parameters */}
                   <NodeParamsForm
                     inputSchema={nodeTypeSchema?.input_schema || null}
-                    outputSchema={nodeTypeSchema?.output_schema || null}
+                    outputSchema={null}
                     config={selectedNode.data.config}
                     onChange={(updatedConfig) =>
                       updateNodeConfig(selectedNode.id, updatedConfig)
                     }
                   />
                 </Box>
-              ) : nodes.length > 0 ? (
-                <Box style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                {/* Output variables — outside padded container */}
+                {hasOutputSchema && (
+                  <Box
+                    mt="md"
+                    style={{
+                      borderTop: '1px solid #dee2e6',
+                      display: 'flex',
+                      flexDirection: 'column',
+                    }}
+                  >
+                    <Box
+                      p="sm"
+                      style={{
+                        borderBottom: '1px solid #dee2e6',
+                        backgroundColor: '#f8f9fa',
+                      }}
+                    >
+                      <Text fw={700} size="sm" c="dark">
+                        Выходные переменные
+                      </Text>
+                    </Box>
+                    <ScrollArea style={{ maxHeight: 200, minHeight: 0 }}>
+                      <Stack gap={0} p="xs">
+                        {Object.entries(outputSchema.properties).map(([paramName, propSchema]) => {
+                          const schema = propSchema as Record<string, unknown>;
+                          const typeLabel = getTypeLabelFromSchema(schema.type as string);
+
+                          return (
+                            <Group key={paramName} gap="xs" wrap="nowrap">
+                              <Code>{paramName}</Code>
+                              <Text size="xs" c="dimmed">
+                                {typeLabel}
+                              </Text>
+                              {typeof schema.description === 'string' && schema.description && (
+                                <Tooltip label={schema.description} withArrow>
+                                  <IconInfoCircle size={14} style={{ cursor: 'pointer', color: '#868e96' }} />
+                                </Tooltip>
+                              )}
+                            </Group>
+                          );
+                        })}
+                      </Stack>
+                    </ScrollArea>
+                  </Box>
+                )}
+              </Box>
+            ) : nodes.length > 0 ? (
+              <Box p="sm" style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                   {nodes.map((node) => (
                     <Box
                       key={node.id}
@@ -787,7 +844,6 @@ function PipelineEditorWithContext() {
                   Нет узлов. Добавьте узел через кнопку ниже.
                 </Text>
               )}
-            </Box>
           </ScrollArea>
 
           <Box

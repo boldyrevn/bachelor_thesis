@@ -856,64 +856,6 @@
         }
       }
     },
-    "/api/v1/pipelines/{pipeline_id}/run/stream": {
-      "post": {
-        "tags": [
-          "pipelines"
-        ],
-        "summary": "Run Pipeline Stream",
-        "description": "Run pipeline with SSE log streaming.\n\nArgs:\n    pipeline_id: Logical pipeline UUID\n    parameters: Pipeline input parameters\n    db: Database session\n\nReturns:\n    SSE stream of logs and final result",
-        "operationId": "run_pipeline_stream_api_v1_pipelines__pipeline_id__run_stream_post",
-        "parameters": [
-          {
-            "name": "pipeline_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Pipeline Id"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "anyOf": [
-                  {
-                    "type": "object"
-                  },
-                  {
-                    "type": "null"
-                  }
-                ],
-                "title": "Parameters"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/api/v1/pipelines/runs/{run_id}": {
       "get": {
         "tags": [
