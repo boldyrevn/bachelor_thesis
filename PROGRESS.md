@@ -340,9 +340,63 @@ class TextOutputNode(BaseNode[TextOutputInput, TextOutputOutput]):
 
 ---
 
+### Session 10 — PipelineRunner Integration, Logging Architecture, Dead Code Cleanup ✅ COMPLETED
+
+**Goal:** Wire PipelineRunner into FastAPI lifespan, replace sync executor with async run endpoint, implement 3-tier logging, clean up dead code, fix frontend/backend bugs.
+
+**Completed Files:**
+- ✅ `backend/app/orchestration/runner.py` — Rewritten: PipelineRunner wired into lifespan, ProcessPoolExecutor-based node execution, 3-tier logging with subprocess handler isolation, extracted `_isolate_logging()`, `_resolve_node_log_path()`, `_LogRedirect` context manager; fixed node log output with `StreamHandler(sys.stdout)`
+- ✅ `backend/app/core/logging_setup.py` — NEW: `setup_server_logging()` and `setup_runner_logging()` with RotatingFileHandler
+- ✅ `backend/app/api/pipeline_runs.py` — Async run endpoint: creates PipelineRun + NodeRun records, returns RUNNING immediately; removed `error_message` from `_node_run_to_dict` (NodeRun has no such field); optimized count query to `func.count()` (O(1) vs O(N))
+- ✅ `backend/app/api/pipelines.py` — Updated pipeline list to use `func.count()` for runs count
+- ✅ `backend/app/orchestration/__init__.py` — Updated exports (removed dead code references)
+- ✅ `backend/app/main.py` — Wired PipelineRunner into lifespan (start/stop)
+- ✅ `frontend/src/flows/PipelineEditor.tsx` — Run button: removed save-before-run, changed "Run Complete" → "Run Started", added `isRunning` loading state
+- ✅ `frontend/src/flows/PipelineRunPage.tsx` — Removed `selectedNodeRun?.error_message` (not in NodeRun model)
+- ✅ `frontend/src/api/client.ts` — Added `timeout: 10000` to axios config
+
+**Deleted (Dead Code):**
+- ❌ `backend/app/orchestration/executor.py` — Old sync NodeExecutor
+- ❌ `backend/app/orchestration/logger.py` — Old StreamingLogger
+- ❌ `backend/app/orchestration/pipeline_executor.py` — Old PipelineExecutor
+- ❌ `backend/tests/integration/test_node_execution.py` — Integration tests for deleted executor
+- ❌ `backend/tests/unit/test_file_logger.py` — Tests for deleted logger
+- ❌ `backend/tests/unit/test_pipeline_executor.py` — Tests for deleted executor
+
+**Architecture Changes:**
+- **Async Run Endpoint**: `POST /api/v1/pipelines/{id}/run` creates PipelineRun (status=RUNNING) + NodeRun records (status=PENDING), returns immediately — PipelineRunner background poller picks up and schedules nodes
+- **PipelineRunner Lifecycle**: Started via FastAPI `@asynccontextmanager` lifespan, graceful shutdown on stop
+- **3-Tier Logging**:
+  - FastAPI (API): STDOUT + `LOG_DIR/server.log`
+  - PipelineRunner (main process): STDOUT + `LOG_DIR/runner.log` (separate logger, `propagate=False`)
+  - Node execution: `LOG_DIR/run_logs/<version_id>/<node_id>/<pipeline_run_id>.log`
+- **Logging Isolation**: Child processes forked by ProcessPoolExecutor inherit parent's logging handlers. `_isolate_logging()` closes ALL inherited handlers and sets `propagate=False` to prevent node logs leaking into server.log
+- **Node Subprocess Output**: `StreamHandler(sys.stdout)` added to `node_logger` — `os.dup2` captures `print()` and subprocess output, but `logging` module writes through handlers, not fd 1/2 directly
+- **Log Path**: Uses `version_id` (not `pipeline_id`) — `run_logs/<version_id>/<node_id>/<pipeline_run_id>.log`
+- **Status Enum Fix**: Replaced custom `PipelineRunStatus`/`NodeRunStatus` enums with model's `RunStatus` (SUCCESS not DONE)
+- **API Count Optimization**: `select(func.count(PipelineRun.id))` instead of `select(id)` + `len()` — O(1) vs O(N) full table scan
+
+**Bug Fixes:**
+- **Empty node log files**: After `_isolate_logging()`, `node_logger` had no handlers — added `StreamHandler(sys.stdout)` which writes to redirected stdout
+- **NodeRun `error_message` AttributeError**: NodeRun model doesn't have `error_message` field; removed from `_node_run_to_dict` and frontend PipelineRunPage
+- **Run button save-before-run**: User should save manually before running; removed auto-save
+- **Run notification mismatch**: Endpoint returns async RUNNING status, not sync completion; changed notification to "Run Started"
+- **Slow runs list page**: O(N) full table scan replaced with O(1) `func.count()` query
+
+**Test Results:** 104 unit tests passing
+
+**Verified:**
+- Pipeline run creates PipelineRun + NodeRun records ✅
+- Background poller schedules nodes ✅
+- Node logs written to correct path with version_id ✅
+- No log leakage into server.log ✅
+- 104 unit tests pass ✅
+
+---
+
 ## Next Steps
 
-### Frontend Tasks (remaining)
+### Frontend tasks (remaining)
 - ~~Pipeline List Page~~ ✅ COMPLETED (Session 8)
 - ~~Save/Load Pipeline~~ ✅ COMPLETED (Session 8)
 - Pipeline Run + SSE Log Viewer
