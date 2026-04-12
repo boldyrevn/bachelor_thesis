@@ -162,9 +162,6 @@ class PipelineRunner:
 
     async def _tick(self) -> None:
         """Single iteration of the poll loop."""
-        active_tasks = len(self._active_tasks)
-        logger.debug("Poll tick: active_tasks=%d", active_tasks)
-
         async with AsyncSession(self._engine) as session:
             # 1. Check completed tasks and update DB
             await self._process_completed_tasks(session)
@@ -684,6 +681,9 @@ class PipelineRunner:
 
         Works at the OS level (fd 1 and fd 2), capturing everything:
         python print(), subprocess output, logging module output, etc.
+
+        In a forked subprocess there is no need to restore sys.stdout/stderr —
+        the process exits after returning a dict, so we just flush and close.
         """
 
         __slots__ = (
@@ -712,26 +712,33 @@ class PipelineRunner:
             os.dup2(self.log_f.fileno(), self._stdout_fd)
             os.dup2(self.log_f.fileno(), self._stderr_fd)
 
-            # Also redirect Python-level stdout/stderr
+            # Also redirect Python-level stdout/stderr to the log file
+            # so that logger.StreamHandler(sys.stdout) writes to it too
             sys.stdout = os.fdopen(self._stdout_fd, "w")
             sys.stderr = os.fdopen(self._stderr_fd, "w")
 
             return self
 
         def __exit__(self, *args: Any) -> None:
-            # Restore original stdout/stderr
+            # Flush and close the Python-level wrappers
             sys.stdout.flush()
             sys.stderr.flush()
+
+            # Restore original fd descriptors (needed so the subprocess
+            # can still serialize its return value via pickle)
             if self._orig_stdout is not None:
                 os.dup2(self._orig_stdout, self._stdout_fd)
-                os.dup2(self._orig_stderr, self._stderr_fd)
                 os.close(self._orig_stdout)
+            if self._orig_stderr is not None:
+                os.dup2(self._orig_stderr, self._stderr_fd)
                 os.close(self._orig_stderr)
+
+            # Close the log file fd
             self.log_f.close()
 
-            # Re-wrap Python file objects
-            sys.stdout = os.fdopen(os.dup(self._stdout_fd), "w")
-            sys.stderr = os.fdopen(os.dup(self._stderr_fd), "w")
+            # Don't re-wrap sys.stdout/stderr — in a forked subprocess
+            # the process is about to exit, no need to restore.
+            # Re-wrapping caused [Errno 9] Bad file descriptor.
 
     # ------------------------------------------------------------------
     # Node execution entry point
@@ -754,31 +761,45 @@ class PipelineRunner:
         # 1. Logging isolation
         PipelineRunner._isolate_logging()
 
-        # 2. Load node
-        from app.nodes.registry import NodeRegistry
-
-        if not NodeRegistry.list_types():
-            NodeRegistry.scan_nodes()
-
-        node = NodeRegistry.create(spec["node_type"])
-
-        if node.input_schema is None:
-            return {
-                "success": False,
-                "outputs": {},
-                "logs": [],
-                "error": f"Node '{spec['node_type']}' does not define input_schema",
-            }
-
-        # 3. Resolve log path
+        # 2. Resolve log path and redirect output FIRST — so ALL errors
+        #    (including node load failures) are captured in the log file
         log_file = PipelineRunner._resolve_node_log_path(
             version_id=spec["version_id"],
             node_id=spec["node_id"],
             pipeline_run_id=spec["pipeline_run_id"],
         )
 
-        # 4. Run with redirected output
         with PipelineRunner._LogRedirect(log_file):
+            # 3. Always re-scan nodes from disk — the parent process may have
+            #    a stale registry if new node files were added while the service
+            #    is running.  scan_nodes() clears its registry first, so this
+            #    is safe to call unconditionally.
+            from app.nodes.registry import NodeRegistry
+
+            NodeRegistry.scan_nodes()
+
+            try:
+                node = NodeRegistry.create(spec["node_type"])
+            except KeyError as e:
+                print(str(e))
+                return {
+                    "success": False,
+                    "outputs": {},
+                    "logs": [],
+                    "error": str(e),
+                }
+
+            if node.input_schema is None:
+                err = f"Node '{spec['node_type']}' does not define input_schema"
+                print(err)
+                return {
+                    "success": False,
+                    "outputs": {},
+                    "logs": [],
+                    "error": err,
+                }
+
+            # 4. Run node logic
             return PipelineRunner._run_node_with_logging(spec, node)
 
     @staticmethod
@@ -828,6 +849,12 @@ class PipelineRunner:
             }
 
         except Exception as e:
+            # Print full traceback to stdout (redirected to log file by
+            # _LogRedirect) so the error is captured in the node's log
+            import traceback
+
+            print(f"EXCEPTION in node {spec['node_id']}:")
+            traceback.print_exc()
             return {
                 "success": False,
                 "outputs": {},

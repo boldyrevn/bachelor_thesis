@@ -8,7 +8,6 @@ from app.nodes.base import BaseNode
 from app.nodes.registry import NodeRegistry
 from app.schemas.connection import PostgresConnection
 
-
 # =============================================================================
 # Typed Input / Output Schemas
 # =============================================================================
@@ -108,9 +107,7 @@ class PostgresQueryNode(BaseNode[PostgresQueryInput, PostgresQueryOutput]):
             finally:
                 await pool.close()
 
-        schema_count, table_count = asyncio.get_event_loop().run_until_complete(
-            _fetch()
-        )
+        schema_count, table_count = asyncio.run(_fetch())
 
         logger.info(
             f"PostgresQueryNode complete: {schema_count} schema(s), {table_count} table(s)"

@@ -1,70 +1,95 @@
 {
     "edges": [
         {
-            "id": "xy-edge__text_outputsource-bottom-postgres_querytarget-top",
-            "source": "text_output",
-            "target": "postgres_query",
+            "id": "xy-edge__all_types_testsource-bottom-text_outputtarget-top",
+            "source": "all_types_test",
+            "target": "text_output",
             "source_handle": "source-bottom",
             "target_handle": "target-top"
         },
         {
-            "id": "xy-edge__postgres_querysource-bottom-text_output_1target-top",
-            "source": "postgres_query",
+            "id": "xy-edge__text_outputsource-bottom-text_output_1target-top",
+            "source": "text_output",
             "target": "text_output_1",
             "source_handle": "source-bottom",
             "target_handle": "target-top"
         },
         {
-            "id": "xy-edge__text_output_1source-bottom-multiply_two_numberstarget-top",
-            "source": "text_output_1",
-            "target": "multiply_two_numbers",
+            "id": "xy-edge__text_outputsource-bottom-text_output_2target-top",
+            "source": "text_output",
+            "target": "text_output_2",
             "source_handle": "source-bottom",
             "target_handle": "target-top"
         },
         {
-            "id": "xy-edge__multiply_two_numberssource-bottom-all_types_testtarget-top",
-            "source": "multiply_two_numbers",
-            "target": "all_types_test",
-            "source_handle": "source-bottom",
-            "target_handle": "target-top"
-        },
-        {
-            "id": "xy-edge__all_types_testsource-bottom-all_types_test_1target-top",
-            "source": "all_types_test",
-            "target": "all_types_test_1",
+            "id": "xy-edge__text_output_2source-bottom-postgres_querytarget-top",
+            "source": "text_output_2",
+            "target": "postgres_query",
             "source_handle": "source-bottom",
             "target_handle": "target-top"
         }
     ],
     "nodes": [
         {
+            "id": "all_types_test",
+            "data": {
+                "label": "all_types_test",
+                "config": {
+                    "date_field": "2026-04-08",
+                    "str_or_int": 456,
+                    "list_of_ints": [
+                        2134,
+                        0,
+                        234563
+                    ],
+                    "optional_str": "skibidi_optional_str",
+                    "required_int": 2432,
+                    "complex_union": true,
+                    "optional_bool": null,
+                    "datetime_field": "2026-04-08T23:52:00Z",
+                    "list_of_floats": [
+                        0.2345,
+                        0,
+                        234.12
+                    ],
+                    "multiline_text": "SELECT * \nFROM private.mazafaka_table\nLIMIT 10",
+                    "optional_float": 23.25,
+                    "list_of_strings": [
+                        "sdf"
+                    ],
+                    "required_string": "fiodjfjo",
+                    "int_with_default": 52,
+                    "bool_with_default": true,
+                    "string_to_int_dict": {
+                        "sgf": 23,
+                        "asdf": 235,
+                        "adsfdf": 123534
+                    },
+                    "string_to_float_dict": {
+                        "dsf": 23.2452,
+                        "adsf": 0,
+                        "3215125": 0.235
+                    }
+                },
+                "nodeType": "all_types_test"
+            },
+            "type": "all_types_test",
+            "position": {
+                "x": 432,
+                "y": 370.5
+            }
+        },
+        {
             "id": "text_output",
             "data": {
                 "label": "text_output",
-                "config": {
-                    "message": "Hello, Booba!"
-                },
+                "config": {},
                 "nodeType": "text_output"
             },
             "type": "text_output",
             "position": {
-                "x": 264.85766423357666,
-                "y": 280.5
-            }
-        },
-        {
-            "id": "postgres_query",
-            "data": {
-                "label": "postgres_query",
-                "config": {
-                    "connection": "d526c90d-d628-46a1-a46e-519dc5063b52"
-                },
-                "nodeType": "postgres_query"
-            },
-            "type": "postgres_query",
-            "position": {
-                "x": 281.28102189781015,
-                "y": 433.89051094890516
+                "x": 453.26500096968357,
+                "y": 496.64161193351424
             }
         },
         {
@@ -72,102 +97,42 @@
             "data": {
                 "label": "text_output_1",
                 "config": {
-                    "message": "Hello, Beba!"
+                    "message": "Я ебу собак!"
                 },
                 "nodeType": "text_output"
             },
             "type": "text_output",
             "position": {
-                "x": 333.53098435963875,
-                "y": 615.5089779479672
+                "x": 373.5606896325343,
+                "y": 600.6964955275207
             }
         },
         {
-            "id": "multiply_two_numbers",
+            "id": "text_output_2",
             "data": {
-                "label": "multiply_two_numbers",
-                "config": {
-                    "a": 34,
-                    "b": 23.2532
-                },
-                "nodeType": "multiply_two_numbers"
+                "label": "text_output_2",
+                "config": {},
+                "nodeType": "text_output"
             },
-            "type": "multiply_two_numbers",
+            "type": "text_output",
             "position": {
-                "x": 540.5482101758818,
-                "y": 616.4597668844191
+                "x": 621.5463279147818,
+                "y": 639.2611926995514
             }
         },
         {
-            "id": "all_types_test",
+            "id": "postgres_query",
             "data": {
-                "label": "all_types_test",
+                "label": "postgres_query",
                 "config": {
-                    "date_field": "2026-04-09",
-                    "str_or_int": "",
-                    "required_int": 34,
-                    "complex_union": "",
-                    "datetime_field": "2026-04-22T03:45:00Z",
-                    "list_of_floats": [
-                        2345245.2352
-                    ],
-                    "optional_union": null,
-                    "list_of_strings": [
-                        "ыфваа",
-                        "asdf",
-                        "243dgg4g"
-                    ],
-                    "required_string": "фвыаф",
-                    "string_to_int_dict": {
-                        "f2f23": "",
-                        "авпа": 234,
-                        "мсчм": 0
-                    },
-                    "string_to_float_dict": {
-                        "пк3п": 0,
-                        "фыва": 0
-                    }
+                    "connection": "dbeae2e0-8918-4e7b-aaa5-878289c4906a"
                 },
-                "nodeType": "all_types_test"
+                "nodeType": "postgres_query"
             },
-            "type": "all_types_test",
+            "type": "postgres_query",
             "position": {
-                "x": 399.2305060234455,
-                "y": 790.3971769860606
-            }
-        },
-        {
-            "id": "all_types_test_1",
-            "data": {
-                "label": "all_types_test_1",
-                "config": {
-                    "date_field": "2026-04-01",
-                    "required_int": 234,
-                    "datetime_field": "2026-04-21T03:45:00Z",
-                    "required_string": "sfgds",
-                    "string_to_int_dict": {
-                        "3": 0,
-                        "23": 0,
-                        "dsg5": 0,
-                        "fwef": 0,
-                        "gdfg": 435,
-                        "fasdf": 0,
-                        "уцкцук": 0
-                    },
-                    "string_to_float_dict": {
-                        "": 0,
-                        "gs": 0,
-                        "gdf": 35,
-                        "fgdg": 23,
-                        "fdhfdg": 0
-                    }
-                },
-                "nodeType": "all_types_test"
-            },
-            "type": "all_types_test",
-            "position": {
-                "x": 555.1652162182136,
-                "y": 898.7329767948889
+                "x": 555.8265512190711,
+                "y": 765.8901172200347
             }
         }
     ]

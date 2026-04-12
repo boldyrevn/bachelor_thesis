@@ -441,3 +441,24 @@ class TextOutputNode(BaseNode[TextOutputInput, TextOutputOutput]):
 - Save without required connection → 400 "connection is required" ✅
 - Run pipeline with postgres_query + connection → 201 success ✅
 - Runs page displays all pipeline runs ✅
+
+---
+
+### Session 11 — Node Log Error Capture, Stale Registry Fix, Runner Log Cleanup ✅ COMPLETED
+
+**Goal:** Fix exception traceback not appearing in node log files, fix stale NodeRegistry in forked subprocess after adding new node types, remove noisy runner logging.
+
+**Completed Files:**
+- ✅ `backend/app/orchestration/runner.py` — Three changes:
+  1. **Exception traceback in node logs**: Added `traceback.print_exc()` in `_run_node_with_logging` except-block — full stacktrace now captured in node log file via redirected stdout
+  2. **Stale NodeRegistry fix**: Changed `if not NodeRegistry.list_types(): NodeRegistry.scan_nodes()` → `NodeRegistry.scan_nodes()` (unconditional) in `_execute_node_in_process` — subprocess now always re-scans from disk, picking up newly added node files without requiring service restart
+  3. **Removed active_tasks poll tick log**: Removed `logger.debug("Poll tick: active_tasks=%d", ...)` from `_tick()` — no longer spams runner.log
+
+**Bug Fixes:**
+- **Exception not in node log file**: `except Exception` only returned `str(e)` — added `traceback.print_exc()` so full stacktrace goes to redirected stdout → node log file
+- **"Node type not found" after adding new node**: `ProcessPoolExecutor` forks inherit parent's stale `NodeRegistry._registry`; guarded `scan_nodes()` was skipped because dict was non-empty → now always calls `scan_nodes()` (safe: it clears registry first)
+- **Runner.log noisy poll ticks**: Removed active_tasks count from every poll tick
+
+**Test Results:** 104 unit tests passing
+
+---

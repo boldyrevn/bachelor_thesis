@@ -125,7 +125,6 @@ class NodeRegistry:
         Returns:
             Number of node types discovered and registered
         """
-        import importlib.util
 
         # Default to the directory containing this file
         if nodes_dir is None:
@@ -175,8 +174,8 @@ class NodeRegistry:
             # Add connection types
             try:
                 from app.schemas.connection import (
-                    PostgresConnection,
                     ClickHouseConnection,
+                    PostgresConnection,
                     S3Connection,
                     SparkConnection,
                 )
