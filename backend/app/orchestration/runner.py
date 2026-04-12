@@ -713,27 +713,23 @@ class PipelineRunner:
             os.dup2(self.log_f.fileno(), self._stderr_fd)
 
             # Also redirect Python-level stdout/stderr to the log file
-            # so that logger.StreamHandler(sys.stdout) writes to it too
-            sys.stdout = os.fdopen(self._stdout_fd, "w")
-            sys.stderr = os.fdopen(self._stderr_fd, "w")
+            # so that logger.StreamHandler(sys.stdout) writes to it too.
+            # IMPORTANT: closefd=False — the wrapper must NOT own fd 1/2.
+            # Without it, GC of the old sys.stdout closes fd 1 (which now
+            # points to the log file), causing [Errno 9] on multiprocess
+            # return-value serialization.
+            sys.stdout = open(self._stdout_fd, "w", closefd=False)
+            sys.stderr = open(self._stderr_fd, "w", closefd=False)
 
             return self
 
         def __exit__(self, *args: Any) -> None:
-            # Flush any pending output
+            # Flush any pending output to the log file
             sys.stdout.flush()
             sys.stderr.flush()
 
-            # IMPORTANT: Do NOT close the original file descriptors here!
-            # After dup2 redirects fd 1/2 back, sys.stdout/stderr would point
-            # to closed fds, causing [Errno 9] Bad file descriptor on any
-            # subsequent print() or logging calls.
-            #
-            # Since this is a forked subprocess that will exit after returning,
-            # we don't need to restore stdout/stderr at all. The process
-            # lifetime is just this single node execution.
-            #
-            # Simply close the log file and let the process exit naturally.
+            # Close the log file — fd 1/2 are still valid because
+            # closefd=False above, so they were never "owned" by Python.
             self.log_f.close()
 
     # ------------------------------------------------------------------
