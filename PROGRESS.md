@@ -462,3 +462,51 @@ class TextOutputNode(BaseNode[TextOutputInput, TextOutputOutput]):
 **Test Results:** 104 unit tests passing
 
 ---
+
+### Session 12 — Pipeline Run Version Tracking, Auto-Refresh, UI Polish & [Errno 9] Fix ✅ COMPLETED
+
+**Goal:** Fix pipeline run viewing wrong version graph, add version column to runs table, replace manual refresh with auto-polling, fix node status coloring, fix [Errno 9] Bad file descriptor in PipelineRunner, enlarge logs modal.
+
+**Completed Files:**
+- ✅ `backend/app/api/pipeline_runs.py` — Added `version` field to run responses:
+  - `list_all_runs`: queries `PipelineVersion.version` alongside `pipeline_id`, passes to `_run_to_dict`
+  - `list_pipeline_runs`: same — fetches version numbers, returns in run dict
+  - `_run_to_dict(run, pipeline_id, version)`: new optional `version` parameter included in response
+- ✅ `backend/app/orchestration/runner.py` — Fixed `[Errno 9] Bad file descriptor` in `_LogRedirect.__exit__`:
+  - **Root cause**: `__exit__` restored fd 1/2 via `os.dup2` then **closed** `_orig_stdout`/`_orig_stderr` — but `sys.stdout`/`sys.stderr` (re-wrapped via `os.fdopen`) still pointed to the now-closed fds, causing "Bad file descriptor" on subsequent `print()` or logging calls
+  - **Fix**: Removed fd restore/close in `__exit__` — just flush and close log file; subprocess exits anyway after returning result
+- ✅ `frontend/src/api/pipelines.ts` — Added `getPipelineRunWithVersion(runId)`:
+  - Fetches run detail + exact `PipelineVersion` that was executed
+  - Returns `{ run, node_runs, pipeline }` where `pipeline` is the versioned graph
+  - Added `pipeline_id?` and `version?` fields to `PipelineRun` interface
+- ✅ `frontend/src/api/connections.ts` — Use `apiWithLongTimeout` for `/test` endpoint (60s instead of 10s)
+- ✅ `frontend/src/api/client.ts` — Added `apiWithLongTimeout` instance with `timeout: 60000`
+- ✅ `frontend/src/components/PipelineRunsPage.tsx` — Added **Version** column to runs table:
+  - Displays `v1`, `v12`, etc. as violet badge
+  - Shows `—` if version unavailable
+- ✅ `frontend/src/flows/PipelineRunPage.tsx` — Multiple fixes:
+  - **Version-aware graph loading**: Uses `getPipelineRunWithVersion()` instead of `getPipeline()` — shows the exact version that was executed, not the current version
+  - **Auto-refresh**: Replaced manual Refresh button with 3-second polling while `status === RUNNING`; stops automatically on completion
+  - **Node status coloring**: Changed from `style.backgroundColor` → `data.statusColor` so `FlowNode` uses the color directly (previously only "corners" were colored)
+  - **NodeList**: Removed status background color (Badge already shows status)
+  - **View Logs**: Hidden for pending nodes
+  - **Logs modal**: Enlarged to `size="90%"` width and `80vh` height
+- ✅ `frontend/src/flows/nodes/FlowNode.tsx` — Reads `data.statusColor` for background color, falls back to selection/default colors
+
+**Bug Fixes:**
+- **[Errno 9] Bad file descriptor**: `_LogRedirect.__exit__` closed fds that `sys.stdout`/`sys.stderr` still referenced → removed fd restore/close in `__exit__`
+- **PipelineRunPage showed wrong version graph**: Was loading current version via `getPipeline(pipelineId)` → now loads exact version via `getPipelineRunWithVersion(runId)`
+- **Node colors only on "corners"**: React Flow `style.backgroundColor` applied to outer container, but `FlowNode`'s inner `Box` overrode it → passed color via `data.statusColor` instead
+- **Manual refresh button**: Replaced with automatic 3-second polling (stops on completion)
+- **Pending nodes showed "View Logs" button**: Hidden for `status === PENDING` (no logs exist yet)
+- **Connection test timeout**: Frontend had 10s timeout, now uses 60s for test endpoint only
+- **Small logs modal**: Enlarged from `size="xl"` + `mah={400}` → `size="90%"` + `80vh`
+
+**Architecture Decisions:**
+- **Version-aware run viewing**: Each run stores `version_id` → frontend fetches that specific version's graph, ensuring old runs display the graph that was actually executed
+- **Auto-refresh only during RUNNING**: Polling stops once run completes (SUCCESS/FAILED/CANCELLED) to avoid unnecessary server load
+- **Two axios instances**: `api` (10s timeout) for normal requests, `apiWithLongTimeout` (60s) for connection tests that may take longer
+
+**Test Results:** 104 unit tests passing, 6 pipeline_runs integration tests passing
+
+---
