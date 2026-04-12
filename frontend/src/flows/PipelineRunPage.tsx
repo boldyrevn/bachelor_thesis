@@ -473,17 +473,19 @@ function PipelineRunPageWithContext() {
                   )}
                 </Group>
 
-                {/* View Logs button */}
-                <Button
-                  variant="outline"
-                  size="xs"
-                  fullWidth
-                  mb="md"
-                  leftSection={<IconFileText size={14} />}
-                  onClick={handleViewLogs}
-                >
-                  View Logs
-                </Button>
+                {/* View Logs button — hide for pending nodes */}
+                {selectedNodeRun?.status !== RunStatus.PENDING && (
+                  <Button
+                    variant="outline"
+                    size="xs"
+                    fullWidth
+                    mb="md"
+                    leftSection={<IconFileText size={14} />}
+                    onClick={handleViewLogs}
+                  >
+                    View Logs
+                  </Button>
+                )}
 
                 <NodeParamsForm
                   inputSchema={nodeTypeSchema?.input_schema || null}
