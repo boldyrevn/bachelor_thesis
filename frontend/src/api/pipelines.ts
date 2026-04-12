@@ -97,6 +97,8 @@ export interface PipelineRun {
   completed_at: string | null;
   error_message: string | null;
   duration_seconds: number | null;
+  pipeline_id?: string;
+  version?: number;
 }
 
 /**
@@ -234,6 +236,33 @@ export const getPipelineRunDetail = async (
 }> => {
   const response = await api.get(`/api/v1/pipelines/runs/${runId}/detail`);
   return response.data;
+};
+
+/**
+ * Get a pipeline run detail with node runs and pipeline version graph
+ * This ensures the graph matches the version that was executed
+ */
+export const getPipelineRunWithVersion = async (
+  runId: string
+): Promise<{
+  run: PipelineRun;
+  node_runs: NodeRun[];
+  pipeline: PipelineVersion;
+}> => {
+  const response = await api.get(`/api/v1/pipelines/runs/${runId}/detail`);
+  const runData = response.data as { run: PipelineRun & { pipeline_id: string }; node_runs: NodeRun[] };
+  
+  // Fetch the exact pipeline version that was executed
+  const pipeline = await getPipelineVersion(
+    runData.run.pipeline_id,
+    runData.run.version_id
+  );
+  
+  return {
+    run: runData.run,
+    node_runs: runData.node_runs,
+    pipeline,
+  };
 };
 
 /**

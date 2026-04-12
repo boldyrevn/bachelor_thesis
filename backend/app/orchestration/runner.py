@@ -720,25 +720,21 @@ class PipelineRunner:
             return self
 
         def __exit__(self, *args: Any) -> None:
-            # Flush and close the Python-level wrappers
+            # Flush any pending output
             sys.stdout.flush()
             sys.stderr.flush()
 
-            # Restore original fd descriptors (needed so the subprocess
-            # can still serialize its return value via pickle)
-            if self._orig_stdout is not None:
-                os.dup2(self._orig_stdout, self._stdout_fd)
-                os.close(self._orig_stdout)
-            if self._orig_stderr is not None:
-                os.dup2(self._orig_stderr, self._stderr_fd)
-                os.close(self._orig_stderr)
-
-            # Close the log file fd
+            # IMPORTANT: Do NOT close the original file descriptors here!
+            # After dup2 redirects fd 1/2 back, sys.stdout/stderr would point
+            # to closed fds, causing [Errno 9] Bad file descriptor on any
+            # subsequent print() or logging calls.
+            #
+            # Since this is a forked subprocess that will exit after returning,
+            # we don't need to restore stdout/stderr at all. The process
+            # lifetime is just this single node execution.
+            #
+            # Simply close the log file and let the process exit naturally.
             self.log_f.close()
-
-            # Don't re-wrap sys.stdout/stderr — in a forked subprocess
-            # the process is about to exit, no need to restore.
-            # Re-wrapping caused [Errno 9] Bad file descriptor.
 
     # ------------------------------------------------------------------
     # Node execution entry point

@@ -150,6 +150,15 @@ export function PipelineRunsPage() {
           )}
         </Table.Td>
         <Table.Td>
+          {run.version !== undefined && run.version !== null ? (
+            <Badge variant="light" color="violet">
+              v{run.version}
+            </Badge>
+          ) : (
+            <Text size="sm" c="dimmed">—</Text>
+          )}
+        </Table.Td>
+        <Table.Td>
           <StatusBadge status={run.status} />
         </Table.Td>
         <Table.Td>{formatDate(run.started_at)}</Table.Td>
@@ -181,6 +190,7 @@ export function PipelineRunsPage() {
           <Table.Tr>
             <Table.Th>Run ID</Table.Th>
             <Table.Th>Pipeline</Table.Th>
+            <Table.Th>Version</Table.Th>
             <Table.Th>Status</Table.Th>
             <Table.Th>Started</Table.Th>
             <Table.Th>Duration</Table.Th>

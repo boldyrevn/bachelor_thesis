@@ -16,12 +16,15 @@ export function FlowNode({ id, data, selected }: NodeProps) {
   const isSelf = draggingFromNodeId === id;
   const isValidTarget = isDragging && !isSelf;
 
+  // Use statusColor from data (set by PipelineRunPage) or fallback to selection color
+  const bgColor = (data.statusColor as string) || (selected ? '#e7f5ff' : '#ffffff');
+
   return (
     <Box
       style={{
         padding: 0,
         minWidth: 180,
-        backgroundColor: selected ? '#e7f5ff' : '#ffffff',
+        backgroundColor: bgColor,
         border: selected ? '2px solid #1971c2' : '1px solid #dee2e6',
         borderRadius: 8,
         boxShadow: '0 1px 3px rgba(0,0,0,0.1)',

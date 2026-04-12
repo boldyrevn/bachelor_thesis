@@ -46,21 +46,25 @@ async def list_all_runs(
     count_result = await db.execute(select(func.count(PipelineRun.id)))
     total = count_result.scalar() or 0
 
-    # Collect version_ids to look up pipeline_ids
+    # Collect version_ids to look up pipeline_ids and version numbers
     version_ids = list({r.version_id for r in runs})
+    version_to_pipeline: dict[str, tuple[str, int]] = {}
     if version_ids:
         versions_result = await db.execute(
-            select(PipelineVersion.id, PipelineVersion.pipeline_id).where(
-                PipelineVersion.id.in_(version_ids)
-            )
+            select(
+                PipelineVersion.id, PipelineVersion.pipeline_id, PipelineVersion.version
+            ).where(PipelineVersion.id.in_(version_ids))
         )
-        version_to_pipeline = {row[0]: row[1] for row in versions_result}
-    else:
-        version_to_pipeline = {}
+        version_to_pipeline = {row[0]: (row[1], row[2]) for row in versions_result}
 
     return {
         "runs": [
-            _run_to_dict(run, version_to_pipeline.get(run.version_id)) for run in runs
+            _run_to_dict(
+                run,
+                pipeline_id=version_to_pipeline.get(run.version_id, (None, None))[0],
+                version=version_to_pipeline.get(run.version_id, (None, None))[1],
+            )
+            for run in runs
         ],
         "total": total,
     }
@@ -84,11 +88,15 @@ async def list_pipeline_runs(
     Returns:
         List of pipeline runs with count
     """
-    # Get all version IDs for this pipeline
+    # Get all version IDs for this pipeline with their version numbers
     versions_result = await db.execute(
-        select(PipelineVersion.id).where(PipelineVersion.pipeline_id == pipeline_id)
+        select(PipelineVersion.id, PipelineVersion.version).where(
+            PipelineVersion.pipeline_id == pipeline_id
+        )
     )
-    version_ids = [row[0] for row in versions_result.all()]
+    version_rows = versions_result.all()
+    version_ids = [row[0] for row in version_rows]
+    version_to_number = {row[0]: row[1] for row in version_rows}
 
     if not version_ids:
         return {"runs": [], "total": 0}
@@ -105,12 +113,21 @@ async def list_pipeline_runs(
 
     # Efficient count using COUNT(*)
     count_result = await db.execute(
-        select(func.count(PipelineRun.id)).where(PipelineRun.version_id.in_(version_ids))
+        select(func.count(PipelineRun.id)).where(
+            PipelineRun.version_id.in_(version_ids)
+        )
     )
     total = count_result.scalar() or 0
 
     return {
-        "runs": [_run_to_dict(run, pipeline_id=pipeline_id) for run in runs],
+        "runs": [
+            _run_to_dict(
+                run,
+                pipeline_id=pipeline_id,
+                version=version_to_number.get(run.version_id),
+            )
+            for run in runs
+        ],
         "total": total,
     }
 
@@ -201,7 +218,9 @@ async def get_node_run_logs(
     return {"logs": content}
 
 
-def _run_to_dict(run: PipelineRun, pipeline_id: str | None = None) -> dict:
+def _run_to_dict(
+    run: PipelineRun, pipeline_id: str | None = None, version: int | None = None
+) -> dict:
     """Convert PipelineRun to dict."""
     duration = None
     if run.started_at and run.completed_at:
@@ -220,6 +239,8 @@ def _run_to_dict(run: PipelineRun, pipeline_id: str | None = None) -> dict:
     }
     if pipeline_id:
         result["pipeline_id"] = pipeline_id
+    if version is not None:
+        result["version"] = version
     return result
 
 

@@ -10,7 +10,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams } from 'react-router-dom';
 import {
   ReactFlow,
   ReactFlowProvider,
@@ -37,7 +37,7 @@ import {
   Divider,
   Modal,
 } from '@mantine/core';
-import { IconRefresh, IconCube, IconFileText } from '@tabler/icons-react';
+import { IconCube, IconFileText } from '@tabler/icons-react';
 import { notifications } from '@mantine/notifications';
 import { ResizeHandle } from './ResizeHandle';
 import { FlowNode } from './nodes/FlowNode';
@@ -47,16 +47,7 @@ import {
 } from './ConnectionDragContext';
 import { NodeParamsForm } from '../components/NodeParamsForm';
 import { getNodeType } from '../api/nodeTypes';
-import {
-  getPipeline,
-  getPipelineRunDetail,
-  getNodeRunLogs,
-  type PipelineNode,
-  type PipelineEdge,
-  type PipelineRun,
-  type NodeRun,
-} from '../api/pipelines';
-import { useRegisterHeaderAction } from '../context/HeaderActionsContext';
+import { getPipelineRunWithVersion, getNodeRunLogs, type PipelineRun, type NodeRun, type PipelineVersion } from '../api/pipelines';
 import type { CanvasNodeData, NodeType as NodeTypeMeta } from '../types/nodeType';
 import { RunStatus } from '../types/pipeline';
 
@@ -105,14 +96,14 @@ function getStatusBadgeColor(status: RunStatus): string {
 }
 
 function PipelineRunPageWithContext() {
-  const { pipelineId, runId } = useParams<{ pipelineId: string; runId: string }>();
-  const navigate = useNavigate();
+  const { runId } = useParams<{ pipelineId: string; runId: string }>();
   const [nodes, setNodes, onNodesChange] = useNodesState<Node<CanvasNodeData>>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [leftWidth, setLeftWidth] = useState(DEFAULT_LEFT_WIDTH);
   const [rightWidth, setRightWidth] = useState(DEFAULT_RIGHT_WIDTH);
   const [pipelineName, setPipelineName] = useState<string>('');
+  const [_pipelineVersion, setPipelineVersion] = useState<PipelineVersion | null>(null);
   const [pipelineRun, setPipelineRun] = useState<PipelineRun | null>(null);
   const [nodeRuns, setNodeRuns] = useState<NodeRun[]>([]);
   const [nodeTypeSchema, setNodeTypeSchema] = useState<NodeTypeMeta | null>(null);
@@ -122,27 +113,25 @@ function PipelineRunPageWithContext() {
     nodeId: '',
     logs: '',
   });
-  const [isRefreshing, setIsRefreshing] = useState(false);
 
   // Refs for latest state
   const runIdRef = useRef(runId);
   runIdRef.current = runId;
 
   const loadData = useCallback(async () => {
-    if (!pipelineId || !runId) return;
+    if (!runId) return;
 
     try {
-      // Load pipeline name
-      const pipeline = await getPipeline(pipelineId);
-      setPipelineName(pipeline.name);
+      // Load run detail WITH the exact pipeline version that was executed
+      const data = await getPipelineRunWithVersion(runId);
+      
+      setPipelineVersion(data.pipeline);
+      setPipelineName(data.pipeline.name);
+      setPipelineRun(data.run);
+      setNodeRuns(data.node_runs);
 
-      // Load run detail
-      const detail = await getPipelineRunDetail(runId);
-      setPipelineRun(detail.run);
-      setNodeRuns(detail.node_runs);
-
-      // Build graph from pipeline
-      const { graph_definition } = pipeline;
+      // Build graph from the EXACT version that was executed (not current version)
+      const { graph_definition } = data.pipeline;
       const rfNodes: Node<CanvasNodeData>[] = (graph_definition.nodes || []).map((n) => ({
         id: n.id,
         type: 'flowNode',
@@ -175,54 +164,32 @@ function PipelineRunPageWithContext() {
     } finally {
       setLoading(false);
     }
-  }, [pipelineId, runId]);
+  }, [runId]);
 
   useEffect(() => {
     loadData();
   }, [loadData]);
 
-  // Refresh handler for header
-  const handleRefresh = useCallback(async () => {
-    if (!runIdRef.current) return;
-    setIsRefreshing(true);
-    try {
-      const detail = await getPipelineRunDetail(runIdRef.current);
-      setPipelineRun(detail.run);
-      setNodeRuns(detail.node_runs);
-      notifications.show({
-        title: 'Refreshed',
-        message: 'Node states updated',
-        color: 'green',
-      });
-    } catch (err) {
-      console.error('Failed to refresh:', err);
-      notifications.show({
-        title: 'Error',
-        message: 'Failed to refresh',
-        color: 'red',
-      });
-    } finally {
-      setIsRefreshing(false);
-    }
-  }, []);
+  // Auto-refresh every 3s while run is in RUNNING state
+  useEffect(() => {
+    const isRunning = pipelineRun?.status === RunStatus.RUNNING;
+    if (!isRunning) return;
 
-  // Refresh button for header
-  const refreshButton = useMemo(
-    () => (
-      <Button
-        key="run-refresh"
-        leftSection={<IconRefresh size={16} />}
-        size="sm"
-        onClick={handleRefresh}
-        loading={isRefreshing}
-      >
-        Refresh
-      </Button>
-    ),
-    [handleRefresh, isRefreshing]
-  );
+    const interval = setInterval(async () => {
+      if (!runIdRef.current) return;
+      try {
+        const data = await getPipelineRunWithVersion(runIdRef.current);
+        setPipelineVersion(data.pipeline);
+        setPipelineName(data.pipeline.name);
+        setPipelineRun(data.run);
+        setNodeRuns(data.node_runs);
+      } catch (err) {
+        console.error('Failed to auto-refresh:', err);
+      }
+    }, 3000);
 
-  useRegisterHeaderAction(refreshButton);
+    return () => clearInterval(interval);
+  }, [pipelineRun?.status]);
 
   // Build node run map for quick lookup
   const nodeRunMap = useMemo(() => {
@@ -233,7 +200,7 @@ function PipelineRunPageWithContext() {
     return map;
   }, [nodeRuns]);
 
-  // Apply node status colors when nodes or nodeRuns change
+  // Apply node status colors through data (not style) so FlowNode uses them
   useEffect(() => {
     if (nodeRuns.length === 0) return;
     setNodes((nds) =>
@@ -244,9 +211,9 @@ function PipelineRunPageWithContext() {
 
         return {
           ...node,
-          style: {
-            ...node.style,
-            backgroundColor: bgColor,
+          data: {
+            ...node.data,
+            statusColor: bgColor,
           },
         };
       })
@@ -556,7 +523,7 @@ function PipelineRunPageWithContext() {
                         alignItems: 'center',
                         borderRadius: 4,
                         border: '1px solid #dee2e6',
-                        backgroundColor: getNodeStatusColor(status),
+                        backgroundColor: '#ffffff',
                       }}
                       onClick={() => setSelectedNodeId(node.id)}
                     >
