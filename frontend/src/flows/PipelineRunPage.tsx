@@ -552,10 +552,11 @@ function PipelineRunPageWithContext() {
         opened={logsModal.open}
         onClose={() => setLogsModal({ open: false, nodeId: '', logs: '' })}
         title={`Logs: ${logsModal.nodeId}`}
-        size="xl"
+        size="90%"
         centered
+        styles={{ body: { height: '80vh' } }}
       >
-        <ScrollArea.Autosize mah={400} type="auto">
+        <ScrollArea.Autosize mah="calc(80vh - 120px)" type="auto">
           <Box
             component="pre"
             style={{
