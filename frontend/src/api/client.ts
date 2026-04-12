@@ -14,6 +14,15 @@ export const api = axios.create({
   timeout: 10000,
 });
 
+export const apiWithLongTimeout = axios.create({
+  baseURL: API_BASE_URL,
+  headers: {
+    'Content-Type': 'application/json',
+  },
+  // 1 minute timeout for connection tests (they can take a while)
+  timeout: 60000,
+});
+
 export interface HelloResponse {
   message: string;
   service: string;

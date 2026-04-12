@@ -1,4 +1,4 @@
-import { api } from './client';
+import { api, apiWithLongTimeout } from './client';
 
 export interface Connection {
   id: string;
@@ -66,7 +66,7 @@ export const connectionsApi = {
   },
 
   test: async (id: string): Promise<ConnectionTestResult> => {
-    const response = await api.post<ConnectionTestResult>(`/api/v1/connections/${id}/test`);
+    const response = await apiWithLongTimeout.post<ConnectionTestResult>(`/api/v1/connections/${id}/test`);
     return response.data;
   },
 };
