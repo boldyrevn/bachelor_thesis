@@ -33,12 +33,14 @@ import {
   deletePipeline,
   type PipelineListItem,
 } from '../api/pipelines';
+import { api } from '../api/client';
 
 export function PipelinesPage() {
   const [pipelines, setPipelines] = useState<PipelineListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [createModalOpened, setCreateModalOpened] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
+  const [runningPipelineId, setRunningPipelineId] = useState<string | null>(null);
   const navigate = useNavigate();
 
   const createForm = useForm({
@@ -132,14 +134,34 @@ export function PipelinesPage() {
   );
 
   const handleRun = useCallback(
-    (_pipelineId: string) => {
-      notifications.show({
-        title: 'Coming Soon',
-        message: 'Pipeline run viewer is under development',
-        color: 'yellow',
-      });
+    async (pipelineId: string) => {
+      setRunningPipelineId(pipelineId);
+      try {
+        const response = await api.post(
+          `/api/v1/pipelines/${pipelineId}/run`,
+          { parameters: {} }
+        );
+        const runId = response.data.id;
+
+        notifications.show({
+          title: 'Run Started',
+          message: 'Pipeline execution is running...',
+          color: 'blue',
+        });
+
+        navigate(`/pipelines/${pipelineId}/runs/${runId}`);
+      } catch (error: any) {
+        const detail = error?.response?.data?.detail;
+        notifications.show({
+          title: 'Run Failed',
+          message: String(detail || error?.message || 'Unknown error').substring(0, 200),
+          color: 'red',
+        });
+      } finally {
+        setRunningPipelineId(null);
+      }
     },
-    []
+    [navigate]
   );
 
   const rows = pipelines.map((pipeline) => (
@@ -183,6 +205,8 @@ export function PipelinesPage() {
               color="green"
               size="sm"
               onClick={() => handleRun(pipeline.pipeline_id)}
+              loading={runningPipelineId === pipeline.pipeline_id}
+              disabled={runningPipelineId !== null}
               title="Run"
             >
               <IconPlayerPlay size={16} />
