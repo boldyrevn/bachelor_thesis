@@ -18,11 +18,19 @@ import {
   ScrollArea,
 } from '@mantine/core';
 import { DateInput, DateTimePicker } from '@mantine/dates';
-import { IconInfoCircle, IconPlus, IconTrash, IconArrowUp, IconArrowDown } from '@tabler/icons-react';
+import {
+  IconInfoCircle,
+  IconPlus,
+  IconTrash,
+  IconArrowUp,
+  IconArrowDown,
+  IconArrowsMaximize,
+} from '@tabler/icons-react';
 import dayjs from 'dayjs';
 import { getConnections } from '../api/connections';
 import type { JsonSchemaProperty } from '../types/nodeType';
 import type { Connection } from '../api/connections';
+import { CodeEditorModal } from './CodeEditorModal';
 
 // ─── Type detection ────────────────────────────────────────────────────────
 
@@ -805,6 +813,7 @@ function FormField({
   isRequired,
   connections,
   defs,
+  onExpand,
 }: {
   propertyName: string;
   property: JsonSchemaProperty;
@@ -813,6 +822,7 @@ function FormField({
   isRequired: boolean;
   connections: Connection[];
   defs: Record<string, JsonSchemaProperty>;
+  onExpand?: (fieldName: string, label: string, description?: string) => void;
 }) {
   const fieldType = getFieldType(property, propertyName, defs);
   const schema = (resolveRef(property as Record<string, unknown>, defs) || property) as Record<string, unknown>;
@@ -987,6 +997,16 @@ function FormField({
           </Text>
           {infoIcon}
           <Badge size="xs" variant="light">{typeLabel}</Badge>
+          {onExpand && (
+            <ActionIcon
+              variant="subtle"
+              size="sm"
+              title="Open in editor"
+              onClick={() => onExpand(propertyName, label, description)}
+            >
+              <IconArrowsMaximize size={16} />
+            </ActionIcon>
+          )}
         </Group>
         <Textarea
           value={toDisplayString(value)}
@@ -1075,6 +1095,12 @@ export function NodeParamsForm({
   onChange: (updatedConfig: Record<string, unknown>) => void;
 }) {
   const [connections, setConnections] = useState<Connection[]>([]);
+  const [codeModal, setCodeModal] = useState<{
+    opened: boolean;
+    fieldName: string;
+    label: string;
+    description?: string;
+  }>({ opened: false, fieldName: '', label: '' });
 
   useEffect(() => {
     let mounted = true;
@@ -1094,6 +1120,21 @@ export function NodeParamsForm({
       onChange(updatedConfig);
     },
     [config, onChange]
+  );
+
+  const handleExpand = useCallback(
+    (fieldName: string, label: string, description?: string) => {
+      setCodeModal({ opened: true, fieldName, label, description });
+    },
+    []
+  );
+
+  const handleCodeChange = useCallback(
+    (value: string) => {
+      const updatedConfig = { ...config, [codeModal.fieldName]: value };
+      onChange(updatedConfig);
+    },
+    [config, onChange, codeModal.fieldName]
   );
 
   const properties = useMemo(() => {
@@ -1146,12 +1187,22 @@ export function NodeParamsForm({
                 isRequired={isRequired}
                 connections={connections}
                 defs={defs}
+                onExpand={handleExpand}
               />
               {!isLast && <Divider mt="xs" />}
             </Box>
           );
         })}
       </Stack>
+
+      <CodeEditorModal
+        opened={codeModal.opened}
+        onClose={() => setCodeModal((prev) => ({ ...prev, opened: false }))}
+        value={(config[codeModal.fieldName] as string) || ''}
+        onChange={handleCodeChange}
+        label={codeModal.label}
+        description={codeModal.description}
+      />
     </Box>
   );
 }

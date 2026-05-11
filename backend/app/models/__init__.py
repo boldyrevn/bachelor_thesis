@@ -2,7 +2,6 @@
 
 from .base import Base, TimestampMixin, create_async_sessionmaker
 from .connection import Connection, ConnectionType
-from .node_output_spec import NodeOutputSpec, OutputType
 from .node_run import NodeRun
 from .node_type import NodeType
 from .pipeline_run import PipelineRun, RunStatus
@@ -18,7 +17,5 @@ __all__ = [
     "PipelineRun",
     "RunStatus",
     "NodeRun",
-    "NodeOutputSpec",
-    "OutputType",
     "NodeType",
 ]

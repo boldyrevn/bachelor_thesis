@@ -703,21 +703,13 @@ class PipelineRunner:
             self._orig_stderr: int | None = None
 
         def __enter__(self) -> "_LogRedirect":
-            # Save original file descriptors
             self._orig_stdout = os.dup(self._stdout_fd)
             self._orig_stderr = os.dup(self._stderr_fd)
 
-            # Open log file and redirect fd 1 and fd 2
             self.log_f = open(self.log_file, "w", encoding="utf-8")
             os.dup2(self.log_f.fileno(), self._stdout_fd)
             os.dup2(self.log_f.fileno(), self._stderr_fd)
 
-            # Also redirect Python-level stdout/stderr to the log file
-            # so that logger.StreamHandler(sys.stdout) writes to it too.
-            # IMPORTANT: closefd=False — the wrapper must NOT own fd 1/2.
-            # Without it, GC of the old sys.stdout closes fd 1 (which now
-            # points to the log file), causing [Errno 9] on multiprocess
-            # return-value serialization.
             sys.stdout = open(self._stdout_fd, "w", closefd=False)
             sys.stderr = open(self._stderr_fd, "w", closefd=False)
 
